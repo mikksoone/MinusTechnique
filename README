@@ -1,1 +1,21 @@
 MinusTechnique using conform-based sorting of rows. Some neat programming techniques from maker of LCM Takeaki Uno.
+
+Required for compiling:
+Cmake
+C++0x compatible compiler
+
+How to compile:
+Create a directory "build" in the root directory. When in that dir, write "make" and Cmake will compile the program for you.
+
+How to run:
+minustechnique input_file outputfile
+
+Multiplatform support:
+Should work in linux and windows systems. Unfortunately currently only tested in linux. 
+
+Visual Studio support:
+Compiles, but haven't yet updated the makefile to support VS. Anyhow, it's easy to create a empty VS project and include the only source file here.
+
+TODO:
+Add the documentation about minustechnique algoritm itself
+
