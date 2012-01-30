@@ -421,7 +421,7 @@ void minus(TRSACT * T)
    TIMER("minus");
 #endif
    loops_after_sort = 0;
-   SORT_THRESHOLD = 3;
+   SORT_THRESHOLD = 1;
 
    do
    {
@@ -468,8 +468,8 @@ int main(int argc, char* argv[])
    const char * inFileName = argv[1];
    const char * outFileName = argv[2];
 #else
-   const char * inFileName = "weather.txt";
-   const char * outFileName = "weather.out";
+   const char * inFileName = "..\\..\\data\\4ta2.txt";
+   const char * outFileName = "..\\..\\data\\4ta2.out";
 #endif
 
    TRSACT_file_load(&T, inFileName);
@@ -489,7 +489,7 @@ int main(int argc, char* argv[])
    TRSACT_free(&T);
 
    TIMER_TYPE total_time = get_time() - start_time;
-   TIMER_TYPE total_seconds = 0;
+   double total_seconds = 0;
    // For getting the time in human-readable form (seconds)
 #ifdef _MSC_VER
    LARGE_INTEGER timerFreq;
