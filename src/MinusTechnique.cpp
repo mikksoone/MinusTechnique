@@ -3,7 +3,7 @@
 
 // If Visual Studio (windows) then...else linux
 // Could maybe use _WIN32 instead
-#ifdef _MSC_VER
+#ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/time.h>
@@ -30,7 +30,7 @@
 // #define HARDCODED_DATA // If we don't want to specify input/output files 
 
 // The timers in windows and linux are different
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define TIMER_TYPE __int64
 #define int64_t __int64
 #else
@@ -288,7 +288,7 @@ void TRSACT_switch(TRSACT * T)
 /* Multiplatform function for getting the time in one big number */
 static inline TIMER_TYPE get_time()
 {
-#ifdef _MSC_VER
+#ifdef _WIN32
    static LARGE_INTEGER li;
    QueryPerformanceCounter(&li);
    return li.QuadPart;
@@ -491,7 +491,7 @@ int main(int argc, char* argv[])
    TIMER_TYPE total_time = get_time() - start_time;
    double total_seconds = 0;
    // For getting the time in human-readable form (seconds)
-#ifdef _MSC_VER
+#ifdef _WIN32
    LARGE_INTEGER timerFreq;
    QueryPerformanceFrequency(&timerFreq);
    total_seconds = (double)total_time/(double)timerFreq.QuadPart;
