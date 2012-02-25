@@ -40,7 +40,7 @@
 // Global data
 int SORT_THRESHOLD = 0;
 int FILE_err=0;
-INT nEdges=0, nNodes=0;
+INT nRows=0, nElems=0;
 INT *g_conform=0;
 
 typedef struct {
@@ -126,36 +126,36 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
 #ifdef DEBUG_TIMER   
    TIMER("load file");
 #endif
-   INT item, i, j;
    FILE *fp = fopen (fname,"r");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
 
-   nNodes = FILE_read_int (fp);
+   nRows = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
-   nEdges = FILE_read_int (fp);
+   nElems = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
    
-   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nEdges + nNodes) );
-   T->elem = (INT **)alloc_memory( sizeof(INT) * nNodes );
-   T->elem_count = (INT *)alloc_memory( sizeof(INT) * nNodes );
-   i = 0; //counter
-   int old_node = -1;
+   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nRows*nElems) );
+   T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
+   T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
+   
+   INT item=0;
+   INT i = 0; // counter
+   INT row = 0; // row id
+   INT elem = 0; // elem id
    do 
    {
-      INT node = FILE_read_int (fp);
-      INT item = FILE_read_int (fp);
-      //FILE_read_int(fp); //get EOL
-      if( old_node != node)
+      T->elem[row] = &T->elem_buf[i]; //save the starting point of a node
+      do 
       {
-         T->elem[node] = &T->elem_buf[i]; //save the starting point of a node
-         T->elem_buf[i++] = node;
-         ++T->elem_count[node];
-      }
-      T->elem_buf[i] = item;
-      ++T->elem_count[node];
-      i++;
-      old_node = node;
+         item = FILE_read_int (fp);
+         if ( (FILE_err&4) == 0)
+         {  // got an item from the file before reaching to line-end
+            T->elem_buf[i++] = item;
+            ++T->elem_count[row];
+         }
+      } while ((FILE_err&3)==0);
+      ++row;
   } while ( (FILE_err&2)==0);
 
    fclose(fp);
@@ -209,29 +209,33 @@ void TRSACT_init( TRSACT * T )
 #endif
    INT i,j;
 
-   T->frq = (INT*) alloc_memory ( sizeof(INT) * nNodes );
+   T->frq = (INT*) alloc_memory ( sizeof(INT) * nRows );
    
    // Fill the frequency table
-   for( j=0 ; j<nNodes ; j++)
+   for( j=0 ; j<nRows ; j++)
+   {
       for( i=0 ; i<T->elem_count[j] ; i++ )
          ++T->frq[T->elem[j][i]];
+   }
 
 
-   T->conform      = (INT*) alloc_memory( sizeof(INT) * nNodes );
-   T->seq         = (INT*) alloc_memory( sizeof(INT) * nNodes );
+   T->conform      = (INT*) alloc_memory( sizeof(INT) * nRows );
+   T->seq         = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq_count   = 0;
 
    // Fill the conform table
-   g_conform = (INT*) alloc_memory( sizeof(INT) * nNodes );
-   for( j=0 ; j<nNodes ; j++)
+   g_conform = (INT*) alloc_memory( sizeof(INT) * nRows );
+   for( j=0 ; j<nRows ; j++)
+   {
       for( i=0 ; i<T->elem_count[j] ; i++ )
          g_conform[j] += T->frq[ T->elem[j][i] ];
+   }
 
    
    // We add number from 0 to nRow to the rows_left vector
    // These number, of course, represent the rows that have not been kicked out just yet
-   T->rows_left.reserve(nNodes);
-   for( i=0 ; i<nNodes ; i++ )
+   T->rows_left.reserve(nRows);
+   for( i=0 ; i<nRows ; i++ )
    {
       if( T->elem_count[i] > 0 ) T->rows_left.push_back(i);
    }
@@ -309,7 +313,7 @@ static inline void sort(TRSACT * T)
    // We measure the time it takes to calculate all coforms and sort the rows
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-   memset( &g_conform[0], 0, sizeof(INT) * nNodes );
+   memset( &g_conform[0], 0, sizeof(INT) * nRows );
    // Calcualte conforms
    for( auto it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
    {
@@ -330,7 +334,7 @@ static inline bool find_min(TRSACT * T)
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
    static auto it_remove = T->rows_left.begin();
-   static int stat_max = nEdges; // Just some big enough number
+   static int stat_max = nRows*nElems; // Just some big enough number
    INT min = stat_max;
    INT min_row;
    INT i;
@@ -339,7 +343,7 @@ static inline bool find_min(TRSACT * T)
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
    int loop_count = 0;
-   for( auto it = T->rows_left.begin()+200000 ; it != T->rows_left.end() ; ++it)
+   for( auto it = T->rows_left.begin(); it != T->rows_left.end() ; ++it)
    {
 #ifdef SORT
       // Here is the part that makes this implementation quick:
@@ -456,7 +460,7 @@ void minus(TRSACT * T)
 #endif
        //printf("%d\n", T->rows_left.size() );
       // We always find new conforms, and don't update the old ones using -- etc
-      memset( T->conform, 0, sizeof(INT) * nNodes );
+      memset( T->conform, 0, sizeof(INT) * nRows );
    }while(1);
 
    // Iteration is faster than recursion
@@ -480,8 +484,8 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\Mikk\\data\\Amazon0302.txt";
-   const char * outFileName = "C:\\Users\\Mikk\\data\\amazon.out";
+   const char * inFileName = "C:\\Users\\Mikk\\data\\accidents.txt";
+   const char * outFileName = "C:\\Users\\Mikk\\data\\accidents.out";
 
    // const char * inFileName = "..\\..\\data\\4ta2.txt";
    // const char * outFileName = "..\\..\\data\\4ta2.out";
