@@ -23,7 +23,7 @@
 // #define PRINT_DEBUG
 #define PRINT_STATUS
 
-#define SORT          // Could be undef if one want's to compare time differences
+//#define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 
 #define HARDCODED_DATA // If we don't want to specify input/output files 
@@ -213,8 +213,10 @@ void TRSACT_init( TRSACT * T )
    
    // Fill the frequency table
    for( j=0 ; j<nNodes ; j++)
+   {
       for( i=0 ; i<T->elem_count[j] ; i++ )
          ++T->frq[T->elem[j][i]];
+   }
 
 
    T->conform      = (INT*) alloc_memory( sizeof(INT) * nNodes );
@@ -224,8 +226,10 @@ void TRSACT_init( TRSACT * T )
    // Fill the conform table
    g_conform = (INT*) alloc_memory( sizeof(INT) * nNodes );
    for( j=0 ; j<nNodes ; j++)
+   {
       for( i=0 ; i<T->elem_count[j] ; i++ )
          g_conform[j] += T->frq[ T->elem[j][i] ];
+   }
 
    
    // We add number from 0 to nRow to the rows_left vector
@@ -339,7 +343,7 @@ static inline bool find_min(TRSACT * T)
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
    int loop_count = 0;
-   for( auto it = T->rows_left.begin()+200000 ; it != T->rows_left.end() ; ++it)
+   for( auto it = T->rows_left.begin(); it != T->rows_left.end() ; ++it)
    {
 #ifdef SORT
       // Here is the part that makes this implementation quick:
