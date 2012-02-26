@@ -415,7 +415,6 @@ void minus(TRSACT * T)
    TIMER("minus");
 #endif
    loops_after_sort = 0;
-   SORT_THRESHOLD = 1000;
 
    do
    {
@@ -468,7 +467,7 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\Mikk\\data\\Amazon0601.txt";
+   const char * inFileName = "C:\\Users\\Mikk\\data\\Amazon0302.txt";
    const char * outFileName = "C:\\Users\\Mikk\\data\\amazon06.out";
 
    // const char * inFileName = "..\\..\\data\\4ta2.txt";
