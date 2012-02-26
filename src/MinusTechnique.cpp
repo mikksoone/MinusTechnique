@@ -13,7 +13,7 @@
 #include <string.h>
 #include <algorithm>
 #include <vector>
-
+#include <climits>
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
 // #include "../ProfilingTimer/ProfilingTimer.h"
@@ -23,7 +23,7 @@
 // #define PRINT_DEBUG
 #define PRINT_STATUS
 
-//#define SORT          // Could be undef if one want's to compare time differences
+#define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 
 #define HARDCODED_DATA // If we don't want to specify input/output files 
@@ -38,10 +38,18 @@
 
 
 // Global data
-int SORT_THRESHOLD = 0;
 int FILE_err=0;
 INT nEdges=0, nNodes=0;
 INT *g_conform=0;
+double g_quadPart;
+// Global time data
+static TIMER_TYPE g_sort_time = 0;
+static TIMER_TYPE g_find_time = 0;
+static TIMER_TYPE g_timeWhenSorted = 0;
+double g_timePerLine = LLONG_MAX;
+bool g_bSort = 0;
+static int loops_after_sort = 0;
+static int elems_removed = 0;
 
 typedef struct {
    INT *elem_buf;   // transactions, its buffer, and their sizes
@@ -53,6 +61,9 @@ typedef struct {
    INT seq_count;
    std::vector<INT> rows_left;
 } TRSACT;
+
+
+static inline void sort(TRSACT * T);
 
 /* Helper function for debugging INT arrays 
    TODO: change %d to %f if needed */
@@ -223,15 +234,9 @@ void TRSACT_init( TRSACT * T )
    T->seq         = (INT*) alloc_memory( sizeof(INT) * nNodes );
    T->seq_count   = 0;
 
-   // Fill the conform table
-   g_conform = (INT*) alloc_memory( sizeof(INT) * nNodes );
-   for( j=0 ; j<nNodes ; j++)
-   {
-      for( i=0 ; i<T->elem_count[j] ; i++ )
-         g_conform[j] += T->frq[ T->elem[j][i] ];
-   }
-
    
+   g_conform = (INT*) alloc_memory( sizeof(INT) * nNodes );
+
    // We add number from 0 to nRow to the rows_left vector
    // These number, of course, represent the rows that have not been kicked out just yet
    T->rows_left.reserve(nNodes);
@@ -240,8 +245,7 @@ void TRSACT_init( TRSACT * T )
       if( T->elem_count[i] > 0 ) T->rows_left.push_back(i);
    }
 
-   // And here we sort the rows according to their conform values
-   std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
+   sort(T);
 }
 
 /* Here we transform the file buffer from vertical to horizontal 
@@ -295,12 +299,6 @@ static inline TIMER_TYPE get_time()
 #endif
 }
 
-// Global time data
-static TIMER_TYPE g_sort_time = 0;
-static TIMER_TYPE g_find_time = 0;
-
-static int loops_after_sort = 0;
-static int elems_removed = 0;
 /* Function for calculating fresh global conforms and then sorting the rows
    according to the just calculated conforms. 
    So, global conforms are the conforms at the time of the last sort 
@@ -313,6 +311,7 @@ static inline void sort(TRSACT * T)
    // We measure the time it takes to calculate all coforms and sort the rows
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
+   g_timeWhenSorted = get_time();
    memset( &g_conform[0], 0, sizeof(INT) * nNodes );
    // Calcualte conforms
    for( auto it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
@@ -320,9 +319,15 @@ static inline void sort(TRSACT * T)
       for( int i=0 ; i<T->elem_count[*it] ; i++ )
          g_conform[*it] += T->frq[ T->elem[*it][i] ];
    }
-   // Sort the rows
-   std::qsort(&T->rows_left[0], T->rows_left.size() /*nRow-g_counter*/, sizeof(INT), qsort_cmp_conform);
+
+   // And here we sort the rows according to their conform values
+   std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
    g_sort_time = get_time() - start_time;
+   g_bSort = false;
+   g_timePerLine = LLONG_MAX;
+   loops_after_sort=0;
+   elems_removed = 0;
+   g_find_time = 0;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -370,14 +375,19 @@ static inline bool find_min(TRSACT * T)
    printf( "row=%d conform=%d\n", min_row, T->conform[min_row] );
    print_int_arr(&T->elem_buf[T->elem[min_row][0]], T->elem_count[min_row], "eliminated row");
 #endif
-   if( T->rows_left.size() % 100 == 0 )
+   if( loops_after_sort % 10 == 0 )
    {
+      TIMER_TYPE timeSinceSort = get_time() - g_timeWhenSorted;
+      double secondsSinceSort = (get_time() - g_timeWhenSorted ) / (double) g_quadPart;
+      double timePerLine =  (get_time() - g_timeWhenSorted ) / (double) (loops_after_sort);
+      if ( timePerLine > g_timePerLine )
+         g_bSort = true;
+
+      g_timePerLine = timePerLine;
       static TIMER_TYPE interval_time = get_time();
       TIMER_TYPE total_time = get_time() - interval_time;
 
-      LARGE_INTEGER timerFreq;
-      QueryPerformanceFrequency(&timerFreq);
-      double total_seconds = (double)total_time/(double)timerFreq.QuadPart;
+      double total_seconds = (double)total_time/(double)g_quadPart;
       interval_time = get_time();
       printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
    }
@@ -398,34 +408,6 @@ static inline bool find_min(TRSACT * T)
    return true;
 }
 
-/* Function that calculates when to sort*/
-static inline void calculate_sort_threshold()
-{
-   // Somewhat awkward way to calculate how many items we should throw out before sorting again
-   // Currently we calculate it based on sorting and finding times
-   static double ratio;
-   ratio = double(g_sort_time)/double(g_find_time);
-   
-   if( ratio < 0.1)
-      SORT_THRESHOLD /= 1.1;
-   else if ( ratio > 10 )
-      SORT_THRESHOLD *= 10;
-   else if( ratio > 5)
-      SORT_THRESHOLD *= 5;
-   else if ( ratio > 3 )
-      SORT_THRESHOLD *= 3;
-   else if ( ratio > 1 )
-      SORT_THRESHOLD *= 2;
-   else if (ratio > 0.6 )
-      SORT_THRESHOLD *= 2;
-   if( SORT_THRESHOLD == 0 )
-      SORT_THRESHOLD = 1;
-   //SORT_THRESHOLD = 100;
-   // Can't do like this (dynamically calcualte), because one abnormality can make the threshold so big,
-   // that the app will actually never sort
-   // SORT_THRESHOLD = int( double(SORT_THRESHOLD) * double(g_sort_time)/double(g_find_time) );
-   
-}
 /* Iteration to order the table */
 void minus(TRSACT * T)
 {
@@ -444,18 +426,14 @@ void minus(TRSACT * T)
       if ( ! find_min( T) ) 
          return; // The end
 #ifdef SORT      
-      if ( loops_after_sort % SORT_THRESHOLD  == 0 )
+      if ( g_bSort )
       {
          sort(T);
 #ifdef PRINT_DEBUG
          printf("sort/find: %4.2f, threshold=%d\n", double(g_sort_time)/double(g_find_time), SORT_THRESHOLD);
 #endif
-         printf("sort/find: %4.2f, threshold=%d\n", double(g_sort_time)/double(g_find_time), SORT_THRESHOLD);
-         printf("%d\n", T->rows_left.size() );
-         calculate_sort_threshold();
-         loops_after_sort=0;
-         elems_removed = 0;
-         g_find_time = 0;
+         //calculate_sort_threshold();
+         printf("rows_left=%d sort_time=%4.2f\n", T->rows_left.size(),(double)g_sort_time/(double)g_quadPart);
       }
 #endif
        //printf("%d\n", T->rows_left.size() );
@@ -473,7 +451,13 @@ int main(int argc, char* argv[])
    TRSACT T;
    TIMER_TYPE start_time = 0;
    start_time = get_time();
-   
+
+#ifdef _WIN32
+   LARGE_INTEGER timerFreq;
+   QueryPerformanceFrequency(&timerFreq);
+   g_quadPart = (double)timerFreq.QuadPart;
+#endif
+
 #ifndef HARDCODED_DATA
    if( argc < 3 )
    {
@@ -484,8 +468,8 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\Mikk\\data\\Amazon0302.txt";
-   const char * outFileName = "C:\\Users\\Mikk\\data\\amazon.out";
+   const char * inFileName = "C:\\Users\\Mikk\\data\\Amazon0601.txt";
+   const char * outFileName = "C:\\Users\\Mikk\\data\\amazon06.out";
 
    // const char * inFileName = "..\\..\\data\\4ta2.txt";
    // const char * outFileName = "..\\..\\data\\4ta2.out";
@@ -511,9 +495,7 @@ int main(int argc, char* argv[])
    double total_seconds = 0;
    // For getting the time in human-readable form (seconds)
 #ifdef _WIN32
-   LARGE_INTEGER timerFreq;
-   QueryPerformanceFrequency(&timerFreq);
-   total_seconds = (double)total_time/(double)timerFreq.QuadPart;
+   total_seconds = (double)total_time/(double)g_quadPart;
 #else
    total_seconds = total_time/1000.0;
 #endif
