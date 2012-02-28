@@ -54,8 +54,7 @@ namespace
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
-   int      nNodes            = 0;
-   int      nEdges            = 0;
+   int      nRows             = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
    double   g_timePerLine     = LLONG_MAX;
@@ -136,7 +135,7 @@ INT FILE_read_int (FILE *fp){
 }
 
 /* load a transaction from the input file to memory (Takeaki Uno style)*/
-void TRSACT_file_load (TRSACT *T, const char *fname)
+void TRSACT_file_load_graph (TRSACT *T, const char *fname)
 {
 #ifdef DEBUG_TIMER   
    TIMER("load file");
@@ -146,14 +145,14 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
 
    if ( !fp ){ printf ("file open error %d\n ", GetLastError() ); exit (1); }
 
-   nNodes = FILE_read_int (fp);
+   nRows = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
-   nEdges = FILE_read_int (fp);
+   int nEdges = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
    
-   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nEdges + nNodes) );
-   T->elem = (INT **)alloc_memory( sizeof(INT) * nNodes );
-   T->elem_count = (INT *)alloc_memory( sizeof(INT) * nNodes );
+   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nEdges + nRows) );
+   T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
+   T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
    i = 0; //counter
    int old_node = -1;
    do 
@@ -171,6 +170,48 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
       ++T->elem_count[node];
       i++;
       old_node = node;
+  } while ( (FILE_err&2)==0);
+
+   fclose(fp);
+}
+
+/* load a transaction from the input file to memory (Takeaki Uno style)*/
+void TRSACT_file_load (TRSACT *T, const char *fname)
+{
+#ifdef DEBUG_TIMER   
+   TIMER("load file");
+#endif
+
+   FILE *fp = fopen (fname,"r");
+
+   if ( !fp ){ printf ("file open error\n"); exit (1); }
+
+   nRows = FILE_read_int (fp);
+   if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
+   int nElems = FILE_read_int (fp);
+   if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
+   
+   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nRows*nElems) );
+   T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
+   T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
+   
+   INT item=0;
+   INT i = 0; // counter
+   INT row = 0; // row id
+   INT elem = 0; // elem id
+   do 
+   {
+      T->elem[row] = &T->elem_buf[i]; //save the starting point of a node
+      do 
+      {
+         item = FILE_read_int (fp);
+         if ( (FILE_err&4) == 0)
+         {  // got an item from the file before reaching to line-end
+            T->elem_buf[i++] = item;
+            ++T->elem_count[row];
+         }
+      } while ((FILE_err&3)==0);
+      ++row;
   } while ( (FILE_err&2)==0);
 
    fclose(fp);
@@ -224,27 +265,27 @@ void TRSACT_init( TRSACT * T )
 #endif
    INT i,j;
 
-   T->frq = (INT*) alloc_memory ( sizeof(INT) * nNodes );
+   T->frq = (INT*) alloc_memory ( sizeof(INT) * nRows );
    
    // Fill the frequency table
-   for( j=0 ; j<nNodes ; j++)
+   for( j=0 ; j<nRows ; j++)
    {
       for( i=0 ; i<T->elem_count[j] ; i++ )
          ++T->frq[T->elem[j][i]];
    }
 
 
-   T->conform      = (INT*) alloc_memory( sizeof(INT) * nNodes );
-   T->seq         = (INT*) alloc_memory( sizeof(INT) * nNodes );
+   T->conform      = (INT*) alloc_memory( sizeof(INT) * nRows );
+   T->seq         = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq_count   = 0;
 
    
-   g_conform = (INT*) alloc_memory( sizeof(INT) * nNodes );
+   g_conform = (INT*) alloc_memory( sizeof(INT) * nRows );
 
    // We add number from 0 to nRow to the rows_left vector
    // These number, of course, represent the rows that have not been kicked out just yet
-   T->rows_left.reserve(nNodes);
-   for( i=0 ; i<nNodes ; i++ )
+   T->rows_left.reserve(nRows);
+   for( i=0 ; i<nRows ; i++ )
    {
       if( T->elem_count[i] > 0 ) T->rows_left.push_back(i);
    }
@@ -316,7 +357,7 @@ static inline void sort(TRSACT * T)
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
    g_timeWhenSorted = get_time();
-   memset( &g_conform[0], 0, sizeof(INT) * nNodes );
+   memset( &g_conform[0], 0, sizeof(INT) * nRows );
    // Calcualte conforms
    std::vector<INT>::iterator it;
    for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
@@ -343,7 +384,7 @@ static inline bool find_min(TRSACT * T)
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
    static  std::vector<INT>::iterator it_remove = T->rows_left.begin();
-   static int stat_max = nEdges; // Just some big enough number
+   static int stat_max = LONG_MAX; // Just some big enough number
    INT min = stat_max;
    INT min_row;
    INT i;
@@ -453,7 +494,7 @@ void minus(TRSACT * T)
       }
 #endif
       // We always find new conforms, and don't update the old ones using -- etc
-      memset( T->conform, 0, sizeof(INT) * nNodes );
+      memset( T->conform, 0, sizeof(INT) * nRows );
    }while(1);
 
    // Iteration is faster than recursion
@@ -477,21 +518,24 @@ int main(int argc, char* argv[])
 #ifndef HARDCODED_DATA
    if( argc < 3 )
    {
-      printf("Specify input and output files\n");
+      printf("Specify input, output files [any third paramter is treated as graph]\n");
       return 1;
    }
    const char * inFileName = argv[1];
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\Amazon0601.txt";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.txt";
+   argc = 3;
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
 	fflush(debug);
 #endif
-
-   TRSACT_file_load(&T, inFileName);
+   if ( argc == 3 )
+      TRSACT_file_load(&T, inFileName);
+   else
+      TRSACT_file_load_graph(&T, inFileName);
 
    TRSACT_init(&T);
 
