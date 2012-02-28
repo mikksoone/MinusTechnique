@@ -36,21 +36,6 @@
 #define TIMER_TYPE double
 #endif
 
-
-// Global data
-int FILE_err=0;
-INT nEdges=0, nNodes=0;
-INT *g_conform=0;
-double g_quadPart;
-// Global time data
-static TIMER_TYPE g_sort_time = 0;
-static TIMER_TYPE g_find_time = 0;
-static TIMER_TYPE g_timeWhenSorted = 0;
-double g_timePerLine = LLONG_MAX;
-bool g_bSort = 0;
-static int loops_after_sort = 0;
-static int elems_removed = 0;
-
 typedef struct {
    INT *elem_buf;   // transactions, its buffer, and their sizes
    INT **elem;
@@ -62,6 +47,25 @@ typedef struct {
    std::vector<INT> rows_left;
 } TRSACT;
 
+// Anonymous namespace for global data
+namespace
+{
+   // General data
+   int      FILE_err          = 0;
+   int      loops_after_sort  = 0;
+   int      elems_removed     = 0;
+   int      nNodes            = 0;
+   int      nEdges            = 0;
+   INT      *g_conform        = 0;
+   double   g_quadPart        = 0;
+   double   g_timePerLine     = LLONG_MAX;
+   bool     g_bSort           = 0;
+   FILE     *debug            = 0;
+   // Timer data
+   TIMER_TYPE g_sort_time     = 0;
+   TIMER_TYPE g_timeWhenSorted= 0;
+   TIMER_TYPE start_time      = 0;
+}
 
 static inline void sort(TRSACT * T);
 
@@ -140,7 +144,7 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    INT item, i, j;
    FILE *fp = fopen (fname,"r");
 
-   if ( !fp ){ printf ("file open error\n"); exit (1); }
+   if ( !fp ){ printf ("file open error %d\n ", GetLastError() ); exit (1); }
 
    nNodes = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
@@ -314,8 +318,9 @@ static inline void sort(TRSACT * T)
    g_timeWhenSorted = get_time();
    memset( &g_conform[0], 0, sizeof(INT) * nNodes );
    // Calcualte conforms
-   for( auto it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
-   {
+   std::vector<INT>::iterator it;
+   for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+{
       for( int i=0 ; i<T->elem_count[*it] ; i++ )
          g_conform[*it] += T->frq[ T->elem[*it][i] ];
    }
@@ -327,7 +332,6 @@ static inline void sort(TRSACT * T)
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
-   g_find_time = 0;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -338,7 +342,7 @@ static inline bool find_min(TRSACT * T)
 #endif
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-   static auto it_remove = T->rows_left.begin();
+   static  std::vector<INT>::iterator it_remove = T->rows_left.begin();
    static int stat_max = nEdges; // Just some big enough number
    INT min = stat_max;
    INT min_row;
@@ -347,8 +351,7 @@ static inline bool find_min(TRSACT * T)
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
-   int loop_count = 0;
-   for( auto it = T->rows_left.begin(); it != T->rows_left.end() ; ++it)
+   for(  std::vector<INT>::iterator it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
    {
 #ifdef SORT
       // Here is the part that makes this implementation quick:
@@ -389,7 +392,12 @@ static inline bool find_min(TRSACT * T)
 
       double total_seconds = (double)total_time/(double)g_quadPart;
       interval_time = get_time();
-      printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
+      static int cnt = 0;
+      if( ++cnt == 20 )
+      {
+         printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
+         cnt = 0;
+      }
    }
    // Remove the min row from the vector of rows left      
    T->rows_left.erase( it_remove );
@@ -404,7 +412,6 @@ static inline bool find_min(TRSACT * T)
    for( i=0 ; i<T->elem_count[min_row] ; i++ )
       --T->frq[ T->elem[min_row][i] ];
    
-   g_find_time += get_time() - start_time;
    return true;
 }
 
@@ -427,15 +434,24 @@ void minus(TRSACT * T)
 #ifdef SORT      
       if ( g_bSort )
       {
+	      int tmp = loops_after_sort;
          sort(T);
 #ifdef PRINT_DEBUG
          printf("sort/find: %4.2f, threshold=%d\n", double(g_sort_time)/double(g_find_time), SORT_THRESHOLD);
 #endif
-         //calculate_sort_threshold();
-         printf("rows_left=%d sort_time=%4.2f\n", T->rows_left.size(),(double)g_sort_time/(double)g_quadPart);
+		   TIMER_TYPE total_time = get_time() - start_time;
+		   double total_seconds = 0;
+		   // For getting the time in human-readable form (seconds)
+#ifdef _WIN32
+         total_seconds = (double)total_time/(double)g_quadPart;
+#endif
+#ifdef DEBUG_STATUS_TO_FILE
+		   fprintf(debug, "%d\t%d\t%4.2f\n", T->rows_left.size(), tmp, total_seconds );
+         fflush(debug);
+#endif
+		   printf("rows_left=%d\t%d\tsort_time=%4.2f\t%4.2f\n", T->rows_left.size(),tmp, (double)g_sort_time/(double)g_quadPart, total_seconds);
       }
 #endif
-       //printf("%d\n", T->rows_left.size() );
       // We always find new conforms, and don't update the old ones using -- etc
       memset( T->conform, 0, sizeof(INT) * nNodes );
    }while(1);
@@ -448,15 +464,16 @@ void minus(TRSACT * T)
 int main(int argc, char* argv[])
 {
    TRSACT T;
-   TIMER_TYPE start_time = 0;
-   start_time = get_time();
-
+  start_time = get_time();
 #ifdef _WIN32
    LARGE_INTEGER timerFreq;
    QueryPerformanceFrequency(&timerFreq);
    g_quadPart = (double)timerFreq.QuadPart;
 #endif
-
+#ifdef DEBUG_STATUS_TO_FILE
+   debug = fopen ("debug.out","w");
+   if( !debug ) { printf("file open err\n"); exit(1); }
+#endif
 #ifndef HARDCODED_DATA
    if( argc < 3 )
    {
@@ -467,11 +484,11 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\Mikk\\data\\Amazon0312.txt";
-   const char * outFileName = "C:\\Users\\Mikk\\data\\amazon06.out";
-
-   // const char * inFileName = "..\\..\\data\\4ta2.txt";
-   // const char * outFileName = "..\\..\\data\\4ta2.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\Amazon0601.txt";
+#endif
+#ifdef DEBUG_STATUS_TO_FILE
+	fprintf(debug, "start..\n");
+	fflush(debug);
 #endif
 
    TRSACT_file_load(&T, inFileName);
@@ -501,6 +518,9 @@ int main(int argc, char* argv[])
    printf("Finished in about %4.2f seconds \n", total_seconds);
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
+#endif
+#ifdef DEBUG_STATUS_TO_FILE
+   fclose(debug);
 #endif
    return 0;
 }
