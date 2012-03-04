@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <vector>
 #include <climits>
+#include <ppl.h>
+#include <atomic>
+//#include "ppl_extras.h"
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
 // #include "../ProfilingTimer/ProfilingTimer.h"
@@ -113,6 +116,15 @@ int qsort_cmp_conform (const void *x, const void *y){
   else return ( g_conform[*((INT *)x)] > g_conform[*((INT *)y)] );
 }
 
+class SortFunc
+{
+public:
+   bool operator()(int left, int right) const
+   {
+      return (g_conform[left] < g_conform[right]);
+   }
+};
+
 /* read an integer from the file (Takeaki Uno)*/
 INT FILE_read_int (FILE *fp){
   INT item;
@@ -166,9 +178,8 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
          T->elem_buf[i++] = node;
          ++T->elem_count[node];
       }
-      T->elem_buf[i] = item;
+      T->elem_buf[i++] = item;
       ++T->elem_count[node];
-      i++;
       old_node = node;
   } while ( (FILE_err&2)==0);
 
@@ -274,7 +285,7 @@ void TRSACT_init( TRSACT * T )
          ++T->frq[T->elem[j][i]];
    }
 
-
+   //print_int_arr( T->frq, nRows, "T->frq" );
    T->conform      = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq         = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq_count   = 0;
@@ -361,18 +372,29 @@ static inline void sort(TRSACT * T)
    // Calcualte conforms
    std::vector<INT>::iterator it;
    for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
-{
+   {
       for( int i=0 ; i<T->elem_count[*it] ; i++ )
          g_conform[*it] += T->frq[ T->elem[*it][i] ];
    }
 
    // And here we sort the rows according to their conform values
-   std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
+   Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
    g_sort_time = get_time() - start_time;
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
+}
+
+template <class ForwardIterator>
+  ForwardIterator min_conform_element ( ForwardIterator first, ForwardIterator last )
+{
+  ForwardIterator lowest = first;
+  if (first==last) return last;
+  while (++first!=last)
+    if (*first<*lowest)    // or: if (comp(*first,*lowest)) for the comp version
+      lowest=first;
+  return lowest;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -383,34 +405,29 @@ static inline bool find_min(TRSACT * T)
 #endif
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-   static  std::vector<INT>::iterator it_remove = T->rows_left.begin();
    static int stat_max = LONG_MAX; // Just some big enough number
-   INT min = stat_max;
+   std::atomic<int> min = 0;
    INT min_row;
    INT i;
    INT loops_to_do = 0;
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
-   for(  std::vector<INT>::iterator it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+
+   Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
    {
-#ifdef SORT
-      // Here is the part that makes this implementation quick:
-      // If the conform at time of the latest sort minus..
-      // ..loops_after_sort*nCol (which is the max possible change in conform)..
-      // ..is bigger than the already found minimum confom, there can't be a lower min..
-      // ..therefore we can quit the loop
-      if(g_conform[*it] - elems_removed >= min )
-         break;
-      
-#endif
       // Calculate the conform for the current row..
-      for( i=0 ; i<T->elem_count[*it] ; i++ )
-         T->conform[*it] += T->frq[ T->elem[(*it)][i] ];
-      // If the current conform is the minimum, mark this row to be removed
-      if( T->conform[*it] < min ) { min = T->conform[*it]; it_remove = it; } 
-         ++loops_to_do; 
-   }
+      for( int i=0 ; i<T->elem_count[value] ; i++ )
+         T->conform[value] += T->frq[ T->elem[(value)][i] ];
+   });
+
+   auto last = T->rows_left.end();
+   auto first = T->rows_left.begin();
+   auto it_remove = T->rows_left.begin();
+
+   while (++first!=last)
+      if( T->conform[*first] <  T->conform[*it_remove] )
+         it_remove=first;
 
    min_row = *it_remove;
    ++loops_after_sort;
@@ -427,6 +444,7 @@ static inline bool find_min(TRSACT * T)
       if ( timePerLine > g_timePerLine )
          g_bSort = true;
 
+      g_bSort = false;
       g_timePerLine = timePerLine;
       static TIMER_TYPE interval_time = get_time();
       TIMER_TYPE total_time = get_time() - interval_time;
@@ -525,8 +543,8 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.txt";
-   argc = 3;
+   const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\logica_git\\MinusTechnique\\data\\soc-Epinions1.txt";
+   argc = 4;
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
