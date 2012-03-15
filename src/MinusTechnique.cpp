@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <vector>
 #include <climits>
+#ifdef _WIN32
 #include <ppl.h>
+#endif
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
 // #include "../ProfilingTimer/ProfilingTimer.h"
@@ -154,9 +156,11 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
 #endif
    INT i;
    FILE *fp = fopen (fname,"r");
-
+#ifdef _WIN32
    if ( !fp ){ printf ("file open error %d\n ", GetLastError() ); exit (1); }
-
+#else
+   if ( !fp ){ printf ("file open error %d\n ", errno ); exit (1); }
+#endif
    nRows = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
    int nEdges = FILE_read_int (fp);
@@ -391,7 +395,11 @@ static inline void sort(TRSACT * T)
    }
 
    // And here we sort the rows according to their conform values
-   //Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+/*
+#ifdef _WIN32
+   Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+#endif
+*/
    //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
    std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_sort_time = get_time() - start_time;
