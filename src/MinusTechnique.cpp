@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 #include <climits>
+#include <ppl.h>
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
 // #include "../ProfilingTimer/ProfilingTimer.h"
@@ -22,7 +23,7 @@
 // Verbal version for debugging
 // #define PRINT_DEBUG
 #define PRINT_STATUS
-
+#define DEBUG_STATUS_TO_FILE
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 
@@ -59,7 +60,10 @@ namespace
    double   g_quadPart        = 0;
    double   g_timePerLine     = LLONG_MAX;
    bool     g_bSort           = 0;
+   bool     g_dontSkip        = 0;
+#ifdef DEBUG_STATUS_TO_FILE
    FILE     *debug            = 0;
+#endif
    // Timer data
    TIMER_TYPE g_sort_time     = 0;
    TIMER_TYPE g_timeWhenSorted= 0;
@@ -83,7 +87,7 @@ void print_int_arr(INT *arr, INT len, const char *name){
 char *alloc_memory (size_t siz){
   char *p = (char *)calloc (siz, 1);
   if ( p == NULL ){
-    printf ("out of memory\n");
+    printf ("out of memory %d\n", GetLastError());
     exit (1);
   }
   return (p);
@@ -113,6 +117,14 @@ int qsort_cmp_conform (const void *x, const void *y){
   else return ( g_conform[*((INT *)x)] > g_conform[*((INT *)y)] );
 }
 
+class SortFunc
+{
+public:
+   bool operator()(int left, int right) const
+   {
+      return (g_conform[left] < g_conform[right]);
+   }
+};
 /* read an integer from the file (Takeaki Uno)*/
 INT FILE_read_int (FILE *fp){
   INT item;
@@ -140,7 +152,7 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
 #ifdef DEBUG_TIMER   
    TIMER("load file");
 #endif
-   INT item, i, j;
+   INT i;
    FILE *fp = fopen (fname,"r");
 
    if ( !fp ){ printf ("file open error %d\n ", GetLastError() ); exit (1); }
@@ -166,9 +178,8 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
          T->elem_buf[i++] = node;
          ++T->elem_count[node];
       }
-      T->elem_buf[i] = item;
+      T->elem_buf[i++] = item;
       ++T->elem_count[node];
-      i++;
       old_node = node;
   } while ( (FILE_err&2)==0);
 
@@ -191,7 +202,7 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    int nElems = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
    
-   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nRows*nElems) );
+   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nRows+nElems) );
    T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
    
@@ -217,6 +228,19 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    fclose(fp);
 }
 
+void print_table_data(TRSACT * T)
+{
+   std::vector<INT>::iterator it;
+   for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+   {
+      fprintf(debug, "%d ", g_conform[*it] );
+      for( int i=0 ; i<T->elem_count[*it] ; i++ )
+         fprintf(debug, "%d ", T->elem[*it][i]);
+      fprintf(debug, "\n");
+   }
+   //fprintf(debug, "%d\t%d\t%4.2f\n", T->rows_left.size(), tmp, total_seconds );
+   fflush(debug);
+}
 /* Prints the reordered table to a file 
 void TRSACT_output_result(TRSACT * T, const char *fname)
 {
@@ -367,12 +391,15 @@ static inline void sort(TRSACT * T)
    }
 
    // And here we sort the rows according to their conform values
-   std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
+   //Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+   //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
+   std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_sort_time = get_time() - start_time;
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
+   g_dontSkip=0;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -383,15 +410,14 @@ static inline bool find_min(TRSACT * T)
 #endif
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-   static  std::vector<INT>::iterator it_remove = T->rows_left.begin();
-   static int stat_max = LONG_MAX; // Just some big enough number
-   INT min = stat_max;
+   int min = LONG_MAX; //g_conform[T->rows_left[0]];
    INT min_row;
    INT i;
    INT loops_to_do = 0;
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
+   auto it_remove = T->rows_left.begin();
    for(  std::vector<INT>::iterator it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
    {
 #ifdef SORT
@@ -413,31 +439,26 @@ static inline bool find_min(TRSACT * T)
    }
 
    min_row = *it_remove;
-   ++loops_after_sort;
+   // printf(" m=%d ", min_row);
 #ifdef PRINT_DEBUG
    print_int_arr(T->conform, nNodes, "conform");
    printf( "row=%d conform=%d\n", min_row, T->conform[min_row] );
    print_int_arr(&T->elem_buf[T->elem[min_row][0]], T->elem_count[min_row], "eliminated row");
 #endif
-   if( loops_after_sort % 10 == 0 )
+   if( ++loops_after_sort % 5 == 0 )
    {
-      TIMER_TYPE timeSinceSort = get_time() - g_timeWhenSorted;
-      double secondsSinceSort = (get_time() - g_timeWhenSorted ) / (double) g_quadPart;
+     TIMER_TYPE timeSinceSort = get_time() - g_timeWhenSorted;
       double timePerLine =  (get_time() - g_timeWhenSorted ) / (double) (loops_after_sort);
       if ( timePerLine > g_timePerLine )
          g_bSort = true;
 
       g_timePerLine = timePerLine;
-      static TIMER_TYPE interval_time = get_time();
-      TIMER_TYPE total_time = get_time() - interval_time;
 
-      double total_seconds = (double)total_time/(double)g_quadPart;
-      interval_time = get_time();
       static int cnt = 0;
-      if( ++cnt == 20 )
+      if( ++cnt % 20  == 0 )
       {
-         printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
-         cnt = 0;
+         double secondsSinceSort = (get_time() - g_timeWhenSorted ) / (double) g_quadPart;
+         printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), secondsSinceSort, T->conform[min_row] );
       }
    }
    // Remove the min row from the vector of rows left      
@@ -525,8 +546,9 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.txt";
-   argc = 3;
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\soc-Epinions1.txt";
+   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
+   argc = 4;
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -539,6 +561,7 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&T);
 
+   // print_table_data(&T);
    minus(&T);
 
    // Because didn't want to program a separate minus function for doing the horizontal removal..
