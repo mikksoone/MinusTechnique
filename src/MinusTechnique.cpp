@@ -414,7 +414,7 @@ static inline bool find_min(TRSACT * T)
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
 
-   Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
+   /*Concurrency::parallel_*/std::for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
    {
       // Calculate the conform for the current row..
       for( int i=0 ; i<T->elem_count[value] ; i++ )
@@ -543,7 +543,7 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\logica_git\\MinusTechnique\\data\\soc-Epinions1.txt";
+   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
    argc = 4;
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
