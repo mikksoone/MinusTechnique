@@ -41,6 +41,7 @@
 
 typedef struct {
    INT *elem_buf;   // transactions, its buffer, and their sizes
+   INT elem_buf_size;
    INT **elem;
    INT *elem_count;
    INT *frq;
@@ -58,6 +59,7 @@ namespace
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
    int      nRows             = 0;
+   int      nCols             = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
    double   g_timePerLine     = LLONG_MAX;
@@ -166,7 +168,8 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
    int nEdges = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
    
-   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nEdges + nRows) );
+   T->elem_buf_size = nEdges + nRows;
+   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
    T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
    i = 0; //counter
@@ -187,6 +190,7 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
       old_node = node;
   } while ( (FILE_err&2)==0);
 
+   nCols = nEdges; //for switch we need to remember edges
    fclose(fp);
 }
 
@@ -205,8 +209,8 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
    int nElems = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
-   
-   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * (nRows+nElems) );
+   T->elem_buf_size = nRows * nElems;
+   T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
    T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
    
@@ -227,8 +231,8 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
          }
       } while ((FILE_err&3)==0);
       ++row;
-  } while ( (FILE_err&2)==0);
-
+   } while ( (FILE_err&2)==0);
+   nCols = nElems;
    fclose(fp);
 }
 
@@ -245,28 +249,35 @@ void print_table_data(TRSACT * T)
    //fprintf(debug, "%d\t%d\t%4.2f\n", T->rows_left.size(), tmp, total_seconds );
    fflush(debug);
 }
-/* Prints the reordered table to a file 
+
+// Prints the reordered table to a file 
 void TRSACT_output_result(TRSACT * T, const char *fname)
 {
 #ifdef DEBUG_TIMER   
    TIMER("output file");
 #endif
-   INT i, j;
+   INT i, j, k;
    FILE *fp = fopen (fname,"w");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
-
-   for( i=0 ; i<nCol ; i++ )
+   for( k = 1; k <= nCols ; k++ )
    {
-      for( j=0 ; j<nRow ; j++) 
+      for( i=0 ; i<nRows ; i++ )
       {
-         fprintf( fp, "%d ", T->buf[ T->seq[j]*nCol+i ] + MIN_ITEM );
+         for( j=0; j<T->elem_count[ T->seq[i] ] ; j++)
+         {
+            if(  T->elem[ T->seq[i] ][ j ] == k )
+            {
+               fprintf( fp, "%d ", i+1 );
+            }
+         }
       }
-      fprintf(fp, "\n");
+       fprintf(fp, "\n");
    }
+
    fclose(fp);
 }
-*/
+
 /* Frees the transaction and global data */
 void TRSACT_free( TRSACT * T )
 {
@@ -293,7 +304,7 @@ void TRSACT_init( TRSACT * T )
 #endif
    INT i,j;
 
-   T->frq = (INT*) alloc_memory ( sizeof(INT) * nRows );
+   T->frq = (INT*) alloc_memory ( sizeof(INT) * (nCols+1) );
    
    // Fill the frequency table
    for( j=0 ; j<nRows ; j++)
@@ -321,20 +332,35 @@ void TRSACT_init( TRSACT * T )
    sort(T);
 }
 
-/* Here we transform the file buffer from vertical to horizontal 
+// Here we transform the file buffer from vertical to horizontal 
 void TRSACT_switch(TRSACT * T)
 {
 #ifdef DEBUG_TIMER   
    TIMER("switch");
 #endif
    printf("Switching..\n");
-   INT i, j, cnt = 0;
+   INT i(0), j(0), k(0), cnt(0);
+
    // Fill the tmp container with values from ordered buf 
-   INT * tmp = (INT*) alloc_memory( sizeof(INT) * nRow*nCol );
-   for( i=0 ; i<nCol ; i++ )
-      for( j=0 ; j<nRow ; j++)   
-         tmp[cnt++] = T->buf[ T->seq[j]*nCol +i ]; 
-   
+   INT * tmp_elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
+   INT ** tmp_elem = (INT **)alloc_memory( sizeof(INT) * nRows );
+   INT * tmp_elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
+
+   for( k = 1; k <= nCols ; k++ )
+   {
+      tmp_elem[k-1] =  &tmp_elem_buf[cnt];
+      for( i=0 ; i<nRows ; i++ )
+      {
+         for( j=0; j<T->elem_count[ T->seq[i] ] ; j++)
+         {
+            if(  T->elem[ T->seq[i] ][ j ] == k )
+            {
+               tmp_elem_buf[cnt++] = i+1;
+               ++tmp_elem_count[k-1];
+            }
+         }
+      }
+   }
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; j++ )
       print_int_arr(&T->buf[T->seq[j]*nCol], nCol, "buf ordered");
@@ -342,10 +368,12 @@ void TRSACT_switch(TRSACT * T)
    // Free the currently used transaction container   
    TRSACT_free(T);
 
-   T->buf = tmp;
-   INT k = nRow;
-   nRow = nCol;
-   nCol = k;
+   T->elem_buf = tmp_elem_buf;
+   T->elem = tmp_elem;
+   T->elem_count = tmp_elem_count;
+   k = nRows;
+   nRows = nCols;
+   nCols = k;
 
 #ifdef PRINT_DEBUG
    for( j=0 ; j<nRow ; j++ )
@@ -356,7 +384,7 @@ void TRSACT_switch(TRSACT * T)
    TRSACT_init(T);
    printf("Switching done\n");
 }
-*/
+
 
 /* Multiplatform function for getting the time in one big number */
 static inline TIMER_TYPE get_time()
@@ -389,7 +417,7 @@ static inline void sort(TRSACT * T)
    // Calcualte conforms
    std::vector<INT>::iterator it;
    for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
-{
+   {
       for( int i=0 ; i<T->elem_count[*it] ; i++ )
          g_conform[*it] += T->frq[ T->elem[*it][i] ];
    }
@@ -401,7 +429,7 @@ static inline void sort(TRSACT * T)
 #endif
 */
    //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
-   std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
+   std::sort( T->rows_left.begin(), T->rows_left.end(), SortFunc() );
    g_sort_time = get_time() - start_time;
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
@@ -471,13 +499,14 @@ static inline bool find_min(TRSACT * T)
    }
    // Remove the min row from the vector of rows left      
    T->rows_left.erase( it_remove );
+   // Remember the row kicked out
+   T->seq[ T->seq_count++ ] = min_row;
 
    if ( T->rows_left.empty() )
       return false; //The end
 
-   // Remember the row kicked out
-   T->seq[ T->seq_count++ ] = min_row;
    elems_removed += T->elem_count[min_row];
+
    // Update the frequency table
    for( i=0 ; i<T->elem_count[min_row] ; i++ )
       --T->frq[ T->elem[min_row][i] ];
@@ -554,9 +583,10 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\soc-Epinions1.txt";
-   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
-   argc = 4;
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\pisi.txt";
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\pisi.out";
+   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
+   argc = 3;
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -574,11 +604,11 @@ int main(int argc, char* argv[])
 
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
-   // TRSACT_switch(&T);
+   TRSACT_switch(&T);
 
- //  minus(&T);
+   minus(&T);
 
-   // TRSACT_output_result(&T, outFileName);
+   TRSACT_output_result(&T, outFileName);
 
    TRSACT_free(&T);
 
