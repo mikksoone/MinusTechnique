@@ -264,12 +264,9 @@ void TRSACT_output_result(TRSACT * T, const char *fname)
    {
       for( i=0 ; i<nRows ; i++ )
       {
-         for( j=0; j<T->elem_count[ T->seq[i] ] ; j++)
+         if( std::binary_search( T->elem[ T->seq[i] ], T->elem[ T->seq[i] ] + T->elem_count[ T->seq[i] ] , k ) )
          {
-            if(  T->elem[ T->seq[i] ][ j ] == k )
-            {
-               fprintf( fp, "%d ", i+1 );
-            }
+            fprintf( fp, "%d ", i+1 );
          }
       }
        fprintf(fp, "\n");
@@ -351,14 +348,25 @@ void TRSACT_switch(TRSACT * T)
       tmp_elem[k-1] =  &tmp_elem_buf[cnt];
       for( i=0 ; i<nRows ; i++ )
       {
+
+         if( std::binary_search( T->elem[ T->seq[i] ], T->elem[ T->seq[i] ] + T->elem_count[ T->seq[i] ] , k ) )
+         {
+            tmp_elem_buf[cnt++] = i+1;
+            ++tmp_elem_count[k-1];
+         }
+         /*
          for( j=0; j<T->elem_count[ T->seq[i] ] ; j++)
          {
             if(  T->elem[ T->seq[i] ][ j ] == k )
             {
                tmp_elem_buf[cnt++] = i+1;
                ++tmp_elem_count[k-1];
+            }else if ( T->elem[ T->seq[i] ][ j ] > k)
+            {
+               break;
             }
          }
+         */
       }
    }
 #ifdef PRINT_DEBUG
@@ -583,8 +591,8 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\pisi.txt";
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\pisi.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.txt";
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
    argc = 3;
 #endif
