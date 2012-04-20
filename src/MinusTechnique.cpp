@@ -209,7 +209,9 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
    int nElems = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
-   T->elem_buf_size = nRows * nElems;
+   T->elem_buf_size = FILE_read_int (fp);
+   if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
+
    T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
    T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
@@ -320,6 +322,9 @@ void TRSACT_init( TRSACT * T )
 
    // We add number from 0 to nRow to the rows_left vector
    // These number, of course, represent the rows that have not been kicked out just yet
+  
+   T->rows_left.erase( T->rows_left.begin(), T->rows_left.end() );
+   T->rows_left.clear();
    T->rows_left.reserve(nRows);
    for( i=0 ; i<nRows ; i++ )
    {
@@ -348,11 +353,11 @@ void TRSACT_switch(TRSACT * T)
       tmp_elem[k-1] =  &tmp_elem_buf[cnt];
       for( i=0 ; i<nRows ; i++ )
       {
-
          if( std::binary_search( T->elem[ T->seq[i] ], T->elem[ T->seq[i] ] + T->elem_count[ T->seq[i] ] , k ) )
          {
             tmp_elem_buf[cnt++] = i+1;
             ++tmp_elem_count[k-1];
+            //printf(" %d", i+1);
          }
          /*
          for( j=0; j<T->elem_count[ T->seq[i] ] ; j++)
@@ -368,6 +373,7 @@ void TRSACT_switch(TRSACT * T)
          }
          */
       }
+      //printf("\n");
    }
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; j++ )
@@ -607,6 +613,9 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&T);
 
+   for(int i = 0; i<nRows; i++)
+      T.seq[i] = i;
+
    // print_table_data(&T);
    minus(&T);
 
@@ -615,7 +624,10 @@ int main(int argc, char* argv[])
    TRSACT_switch(&T);
 
    minus(&T);
-
+   
+   for(int i = 0; i<nRows; i++)
+      printf("%d ", T.seq[i] );
+      
    TRSACT_output_result(&T, outFileName);
 
    TRSACT_free(&T);
