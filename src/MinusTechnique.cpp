@@ -240,12 +240,12 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
 
 void print_table_data(TRSACT * T)
 {
-   std::vector<INT>::iterator it;
-   for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+   for( int j = 0, k = 0; j < nRows; j++ )
    {
-      fprintf(debug, "%d ", g_conform[*it] );
-      for( int i=0 ; i<T->elem_count[*it] ; i++ )
-         fprintf(debug, "%d ", T->elem[*it][i]);
+      k=j; //T->seq[j];
+      fprintf(debug, "%d ", g_conform[k] );
+      for( int i=0 ; i<T->elem_count[k] ; i++ )
+         fprintf(debug, "%d ", T->elem[k][i]);
       fprintf(debug, "\n");
    }
    //fprintf(debug, "%d\t%d\t%4.2f\n", T->rows_left.size(), tmp, total_seconds );
@@ -253,7 +253,7 @@ void print_table_data(TRSACT * T)
 }
 
 // Prints the reordered table to a file 
-void TRSACT_output_result(TRSACT * T, const char *fname)
+void TRSACT_output_row_order(TRSACT * T, const char *fname)
 {
 #ifdef DEBUG_TIMER   
    TIMER("output file");
@@ -262,18 +262,44 @@ void TRSACT_output_result(TRSACT * T, const char *fname)
    FILE *fp = fopen (fname,"w");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
-   for( k = 1; k <= nCols ; k++ )
+   for(int i = 0; i<nRows; i++)
+      fprintf( fp, "%d\n", T->seq[i]+1 );
+   
+   fprintf(fp, "\n");
+
+   fclose(fp);
+}
+
+// Prints the reordered table to a file 
+void TRSACT_output_result(TRSACT * TRows, TRSACT * TCols, const char * fname)
+{
+#ifdef DEBUG_TIMER   
+   TIMER("output file");
+#endif
+   INT i, j, k;
+   FILE *fp = fopen (fname,"w");
+
+   if ( !fp ){ printf ("file open error\n"); exit (1); }
+   for( k = 0; k < nCols ; k++ )
    {
-      for( i=0 ; i<nRows ; i++ )
+      int row = TRows->seq[k];
+
+      std::sort( TRows->elem[row], TRows->elem[row]+TRows->elem_count[ TRows->seq[row] ],
+         [TCols](int a, int b){ return TCols->seq[a] < TCols->seq[b]; });
+      for( i=0 ; i<TRows->elem_count[row] ; ++i )
       {
-         if( std::binary_search( T->elem[ T->seq[i] ], T->elem[ T->seq[i] ] + T->elem_count[ T->seq[i] ] , k ) )
-         {
-            fprintf( fp, "%d ", i+1 );
-         }
+         fprintf( fp, "%d ", TRows->elem[row][i] );
       }
        fprintf(fp, "\n");
    }
-
+   // Also print the order of cols and rows
+   fprintf(fp, "\nColumn order:\n");
+   for( i=0; i<nRows; ++i)
+      fprintf( fp, "%d ", TCols->seq[i] );
+   fprintf(fp, "\nRow order:\n");
+   for( i=0; i<nCols; ++i)
+      fprintf( fp, "%d ", TRows->seq[i] );
+   fprintf(fp, "\n");
    fclose(fp);
 }
 
@@ -289,9 +315,6 @@ void TRSACT_free( TRSACT * T )
 
    free( T->conform );
    free( T->seq );
-
-   free( g_conform );
-
    free( T->frq );
 }
 
@@ -312,6 +335,10 @@ void TRSACT_init( TRSACT * T )
          ++T->frq[T->elem[j][i]];
    }
 
+#ifdef PRINT_DEBUG
+   for( i=0; i<T->elem_count[1] ;i++)
+      printf(" [%d]%d", T->elem[1][i], T->frq[T->elem[1][i]]);
+#endif
 
    T->conform      = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq         = (INT*) alloc_memory( sizeof(INT) * nRows );
@@ -335,7 +362,7 @@ void TRSACT_init( TRSACT * T )
 }
 
 // Here we transform the file buffer from vertical to horizontal 
-void TRSACT_switch(TRSACT * T)
+void TRSACT_switch(TRSACT * T, TRSACT * cols)
 {
 #ifdef DEBUG_TIMER   
    TIMER("switch");
@@ -344,47 +371,28 @@ void TRSACT_switch(TRSACT * T)
    INT i(0), j(0), k(0), cnt(0);
 
    // Fill the tmp container with values from ordered buf 
-   INT * tmp_elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
-   INT ** tmp_elem = (INT **)alloc_memory( sizeof(INT) * nRows );
-   INT * tmp_elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
+   cols->elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
+   cols->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
+   cols->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
 
    for( k = 1; k <= nCols ; k++ )
    {
-      tmp_elem[k-1] =  &tmp_elem_buf[cnt];
+      cols->elem[k-1] =  &cols->elem_buf[cnt];
       for( i=0 ; i<nRows ; i++ )
       {
          if( std::binary_search( T->elem[ T->seq[i] ], T->elem[ T->seq[i] ] + T->elem_count[ T->seq[i] ] , k ) )
          {
-            tmp_elem_buf[cnt++] = i+1;
-            ++tmp_elem_count[k-1];
-            //printf(" %d", i+1);
+            cols->elem_buf[cnt++] = i+1;
+            ++cols->elem_count[k-1];
          }
-         /*
-         for( j=0; j<T->elem_count[ T->seq[i] ] ; j++)
-         {
-            if(  T->elem[ T->seq[i] ][ j ] == k )
-            {
-               tmp_elem_buf[cnt++] = i+1;
-               ++tmp_elem_count[k-1];
-            }else if ( T->elem[ T->seq[i] ][ j ] > k)
-            {
-               break;
-            }
-         }
-         */
       }
-      //printf("\n");
    }
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; j++ )
       print_int_arr(&T->buf[T->seq[j]*nCol], nCol, "buf ordered");
 #endif
    // Free the currently used transaction container   
-   TRSACT_free(T);
 
-   T->elem_buf = tmp_elem_buf;
-   T->elem = tmp_elem;
-   T->elem_count = tmp_elem_count;
    k = nRows;
    nRows = nCols;
    nCols = k;
@@ -395,7 +403,7 @@ void TRSACT_switch(TRSACT * T)
 #endif
 
    // Init again..
-   TRSACT_init(T);
+   TRSACT_init(cols);
    printf("Switching done\n");
 }
 
@@ -576,7 +584,6 @@ void minus(TRSACT * T)
 /* main main*/
 int main(int argc, char* argv[])
 {
-   TRSACT T;
   start_time = get_time();
 #ifdef _WIN32
    LARGE_INTEGER timerFreq;
@@ -597,8 +604,8 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.txt";
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\logica_git\\MinusTechnique\\data\\accidents.out";
+   const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess.dat";
+   const char * outFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
    argc = 3;
 #endif
@@ -606,32 +613,39 @@ int main(int argc, char* argv[])
 	fprintf(debug, "start..\n");
 	fflush(debug);
 #endif
+   TRSACT TRows;
    if ( argc == 3 )
-      TRSACT_file_load(&T, inFileName);
+      TRSACT_file_load(&TRows, inFileName);
    else
-      TRSACT_file_load_graph(&T, inFileName);
+      TRSACT_file_load_graph(&TRows, inFileName);
 
-   TRSACT_init(&T);
+   TRSACT_init(&TRows);
 
-   for(int i = 0; i<nRows; i++)
-      T.seq[i] = i;
-
-   // print_table_data(&T);
-   minus(&T);
-
+    minus(&TRows);
+   // print_table_data(&TRows);   
+   /* for(int i = 0; i<nRows; i++)
+      TRows.seq[i] = i; */
+      
+   // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
-   TRSACT_switch(&T);
+   // print_table_data(&TRows);
 
-   minus(&T);
+   TRSACT TCols;
+   TRSACT_switch(&TRows, &TCols);
+
+   minus(&TCols);
    
-   for(int i = 0; i<nRows; i++)
-      printf("%d ", T.seq[i] );
-      
-   TRSACT_output_result(&T, outFileName);
-
-   TRSACT_free(&T);
-
+   // print_table_data(&TCols);
+   
+   // TRSACT_output_row_order(&TCols, outFileName);
+   
+   TRSACT_output_result(&TRows, &TCols, outFileName);
+   
+   TRSACT_free(&TCols);
+   TRSACT_free(&TRows);
+   free( g_conform );
+   
    TIMER_TYPE total_time = get_time() - start_time;
    double total_seconds = 0;
    // For getting the time in human-readable form (seconds)
