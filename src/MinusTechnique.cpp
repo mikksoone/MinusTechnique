@@ -380,12 +380,13 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
       cols->elem[k-1] =  &cols->elem_buf[cnt];
       for( i=0 ; i<nRows ; i++ )
       {
-         if( std::binary_search( T->elem[ T->seq[i] ], T->elem[ T->seq[i] ] + T->elem_count[ T->seq[i] ] , k ) )
+         if( std::binary_search( T->elem[ i ], T->elem[ i ] + T->elem_count[ i ] , k ) )
          {
             cols->elem_buf[cnt++] = i+1;
             ++cols->elem_count[k-1];
          }
       }
+      //printf("%d ", k); 
    }
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; j++ )
@@ -604,8 +605,10 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
+   //const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\data\\Amazon0302.dat";
+   //const char * outFileName = "C:\\Users\\Mikk\\Dropbox\\data\\Amazon0302.out";
    const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess.dat";
-   const char * outFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess.out";
+   const char * outFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess2.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
    argc = 3;
 #endif
@@ -623,9 +626,9 @@ int main(int argc, char* argv[])
 
     minus(&TRows);
    // print_table_data(&TRows);   
-   /* for(int i = 0; i<nRows; i++)
-      TRows.seq[i] = i; */
-      
+    /*for(int i = 0; i<nRows; i++)
+      TRows.seq[i] = i; 
+      */
    // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
