@@ -13,6 +13,7 @@
 #include <string.h>
 #include <algorithm>
 #include <vector>
+#include <set>
 #include <climits>
 #ifdef _WIN32
 #include <ppl.h>
@@ -81,7 +82,7 @@ static inline void sort(TRSACT * T);
 void print_int_arr(INT *arr, INT len, const char *name){
    INT i;
    //return;
-   for( i=0 ; i<len ; i++){
+   for( i=0 ; i<len ; ++i){
       printf("%d ", arr[i]);
    }
    printf ("==%s==========\n", name);
@@ -105,7 +106,7 @@ char *realloc_memory (char *p, int sizof, size_t siz, size_t *org_siz){
     printf ("out of memory\n");
     exit (1);
   }
-  for ( i=(*org_siz)*sizof ; i<siz*sizof ; i++ ) p[i] = 0;
+  for ( i=(*org_siz)*sizof ; i<siz*sizof ; ++i ) p[i] = 0;
   *org_siz = siz;
   return (p);
 }
@@ -240,11 +241,11 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
 
 void print_table_data(TRSACT * T)
 {
-   for( int j = 0, k = 0; j < nRows; j++ )
+   for( int j = 0, k = 0; j < nRows; ++j )
    {
       k=j; //T->seq[j];
       fprintf(debug, "%d ", g_conform[k] );
-      for( int i=0 ; i<T->elem_count[k] ; i++ )
+      for( int i=0 ; i<T->elem_count[k] ; ++i )
          fprintf(debug, "%d ", T->elem[k][i]);
       fprintf(debug, "\n");
    }
@@ -262,7 +263,7 @@ void TRSACT_output_row_order(TRSACT * T, const char *fname)
    FILE *fp = fopen (fname,"w");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
-   for(int i = 0; i<nRows; i++)
+   for(int i = 0; i<nRows; ++i)
       fprintf( fp, "%d\n", T->seq[i]+1 );
    
    fprintf(fp, "\n");
@@ -280,10 +281,10 @@ void TRSACT_output_result(TRSACT * TRows, TRSACT * TCols, const char * fname)
    FILE *fp = fopen (fname,"w");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
-   for( k = 0; k < nCols ; k++ )
+   for( k = 0; k < nCols ; ++k )
    {
       int row = TRows->seq[k];
-
+      // We need to sort the rows according to the 
       std::sort( TRows->elem[row], TRows->elem[row]+TRows->elem_count[ TRows->seq[row] ],
          [TCols](int a, int b){ return TCols->seq[a] < TCols->seq[b]; });
       for( i=0 ; i<TRows->elem_count[row] ; ++i )
@@ -331,12 +332,12 @@ void TRSACT_init( TRSACT * T )
    // Fill the frequency table
    for( j=0 ; j<nRows ; j++)
    {
-      for( i=0 ; i<T->elem_count[j] ; i++ )
+      for( i=0 ; i<T->elem_count[j] ; ++i )
          ++T->frq[T->elem[j][i]];
    }
 
 #ifdef PRINT_DEBUG
-   for( i=0; i<T->elem_count[1] ;i++)
+   for( i=0; i<T->elem_count[1] ;++i)
       printf(" [%d]%d", T->elem[1][i], T->frq[T->elem[1][i]]);
 #endif
 
@@ -353,9 +354,9 @@ void TRSACT_init( TRSACT * T )
    T->rows_left.erase( T->rows_left.begin(), T->rows_left.end() );
    T->rows_left.clear();
    T->rows_left.reserve(nRows);
-   for( i=0 ; i<nRows ; i++ )
+   for( i=0 ; i<nRows ; ++i )
    {
-      if( T->elem_count[i] > 0 ) T->rows_left.push_back(i);
+      T->rows_left.push_back(i);
    }
 
    sort(T);
@@ -375,10 +376,10 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
    cols->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    cols->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
 
-   for( k = 1; k <= nCols ; k++ )
+   for( k = 1; k <= nCols ; ++k )
    {
       cols->elem[k-1] =  &cols->elem_buf[cnt];
-      for( i=0 ; i<nRows ; i++ )
+      for( i=0 ; i<nRows ; ++i )
       {
          if( std::binary_search( T->elem[ i ], T->elem[ i ] + T->elem_count[ i ] , k ) )
          {
@@ -389,7 +390,7 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
       //printf("%d ", k); 
    }
 #ifdef PRINT_DEBUG
-   for( j=0; j<nRow ; j++ )
+   for( j=0; j<nRow ; ++j )
       print_int_arr(&T->buf[T->seq[j]*nCol], nCol, "buf ordered");
 #endif
    // Free the currently used transaction container   
@@ -399,7 +400,7 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
    nCols = k;
 
 #ifdef PRINT_DEBUG
-   for( j=0 ; j<nRow ; j++ )
+   for( j=0 ; j<nRow ; ++j )
       print_int_arr(&T->buf[j*nCol], nCol, "buf switched");
 #endif
 
@@ -441,7 +442,7 @@ static inline void sort(TRSACT * T)
    std::vector<INT>::iterator it;
    for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
    {
-      for( int i=0 ; i<T->elem_count[*it] ; i++ )
+      for( int i=0 ; i<T->elem_count[*it] ; ++i )
          g_conform[*it] += T->frq[ T->elem[*it][i] ];
    }
 
@@ -490,7 +491,7 @@ static inline bool find_min(TRSACT * T)
       
 #endif
       // Calculate the conform for the current row..
-      for( i=0 ; i<T->elem_count[*it] ; i++ )
+      for( i=0 ; i<T->elem_count[*it] ; ++i )
          T->conform[*it] += T->frq[ T->elem[(*it)][i] ];
       // If the current conform is the minimum, mark this row to be removed
       if( T->conform[*it] < min ) { min = T->conform[*it]; it_remove = it; } 
@@ -531,7 +532,7 @@ static inline bool find_min(TRSACT * T)
    elems_removed += T->elem_count[min_row];
 
    // Update the frequency table
-   for( i=0 ; i<T->elem_count[min_row] ; i++ )
+   for( i=0 ; i<T->elem_count[min_row] ; ++i )
       --T->frq[ T->elem[min_row][i] ];
    
    return true;
@@ -626,9 +627,10 @@ int main(int argc, char* argv[])
 
     minus(&TRows);
    // print_table_data(&TRows);   
-    /*for(int i = 0; i<nRows; i++)
+   /* For debugging only columns
+    for(int i = 0; i<nRows; ++i)
       TRows.seq[i] = i; 
-      */
+   */
    // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
