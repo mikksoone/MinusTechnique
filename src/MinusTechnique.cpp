@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 #include <set>
+#include <unordered_set>
 #include <climits>
 #ifdef _WIN32
 #include <ppl.h>
@@ -191,7 +192,7 @@ void TRSACT_file_load_graph (TRSACT *T, const char *fname)
       old_node = node;
   } while ( (FILE_err&2)==0);
 
-   nCols = nEdges; //for switch we need to remember edges
+   nCols = nRows; //for switch we need to remember edges
    fclose(fp);
 }
 
@@ -362,6 +363,8 @@ void TRSACT_init( TRSACT * T )
    sort(T);
 }
 
+
+
 // Here we transform the file buffer from vertical to horizontal 
 void TRSACT_switch(TRSACT * T, TRSACT * cols)
 {
@@ -376,18 +379,42 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
    cols->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    cols->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
 
+   /* // Switching using set/hash_set...both are slow
+   typedef std::set<int> map; 
+   std::vector < map > row_col_vec;
+   row_col_vec.reserve( nRows );
+   for( i=0; i<nRows; ++i)
+   {
+      map row_col_map;
+      for( j=0; j<T->elem_count[ i ]; ++j)
+      {
+         row_col_map.insert(map::value_type(T->elem[i][j] ));
+      }
+      row_col_vec.push_back( row_col_map );
+   }
+   */
    for( k = 1; k <= nCols ; ++k )
    {
       cols->elem[k-1] =  &cols->elem_buf[cnt];
       for( i=0 ; i<nRows ; ++i )
       {
-         if( std::binary_search( T->elem[ i ], T->elem[ i ] + T->elem_count[ i ] , k ) )
+       
+         for( j=0; j<T->elem_count[ i ]; ++j)
          {
-            cols->elem_buf[cnt++] = i+1;
-            ++cols->elem_count[k-1];
+            // if( row_col_vec[i].count(k) ) // 
+            // Switching using binary_search is also slower
+            // if( std::binary_search( T->elem[ i ], T->elem[ i ] + T->elem_count[ i ] , k ) )
+            if(  T->elem[i][j] == k ) 
+            {
+               cols->elem_buf[cnt++] = i+1;
+               ++cols->elem_count[k-1];
+            } else if ( k > T->elem[i][j] )
+            {
+               break;
+            }
          }
       }
-      //printf("%d ", k); 
+      if ( ! (k % 100) )printf("%d ", k); 
    }
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; ++j )
@@ -606,12 +633,11 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   //const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\data\\Amazon0302.dat";
-   //const char * outFileName = "C:\\Users\\Mikk\\Dropbox\\data\\Amazon0302.out";
-   const char * inFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess.dat";
-   const char * outFileName = "C:\\Users\\Mikk\\Dropbox\\data\\chess2.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
-   argc = 3;
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -625,12 +651,12 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&TRows);
 
-    minus(&TRows);
+   minus(&TRows);
    // print_table_data(&TRows);   
-   /* For debugging only columns
+   /*/ For debugging only columns
     for(int i = 0; i<nRows; ++i)
-      TRows.seq[i] = i; 
-   */
+      TRows.seq[i] = i; */
+   
    // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
