@@ -15,6 +15,8 @@
 #include <vector>
 #include <set>
 #include <unordered_set>
+#include <atomic>
+#include <thread>
 #include <climits>
 #ifdef _WIN32
 #include <ppl.h>
@@ -60,10 +62,12 @@ namespace
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
+   int      break_point       = 0;
    int      nRows             = 0;
    int      nCols             = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
+   double   g_timeForConform  = 0;
    double   g_timePerLine     = LLONG_MAX;
    bool     g_bSort           = 0;
    bool     g_dontSkip        = 0;
@@ -74,6 +78,8 @@ namespace
    TIMER_TYPE g_sort_time     = 0;
    TIMER_TYPE g_timeWhenSorted= 0;
    TIMER_TYPE start_time      = 0;
+   CRITICAL_SECTION cs;
+   std::atomic<int> min       = 0;
 }
 
 static inline void sort(TRSACT * T);
@@ -357,7 +363,8 @@ void TRSACT_init( TRSACT * T )
    T->rows_left.reserve(nRows);
    for( i=0 ; i<nRows ; ++i )
    {
-      T->rows_left.push_back(i);
+      if( T->elem_count[i] )
+         T->rows_left.push_back(i);
    }
 
    sort(T);
@@ -486,7 +493,45 @@ static inline void sort(TRSACT * T)
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
+   break_point = 0;
    g_dontSkip=0;
+}
+
+inline int calculate_conform(int j, int increment, int size, TRSACT * T)
+{
+   if( j >= size )
+      return j;
+   for( ; j < size ; j+=increment )
+   {
+      auto row = T->rows_left[j];
+#ifdef SORT
+      // Here is the part that makes this implementation quick:
+      // If the conform at time of the latest sort minus..
+    // ..loops_after_sort*nCol (which is the max possible change in conform)..
+      // ..is bigger than the already found minimum confom, there can't be a lower min..
+      // ..therefore we can quit the loop
+      if(g_conform[row] - elems_removed >= min )
+      {
+         fprintf(debug, "%d\n", j+1);
+         return j;
+      }
+#endif
+      // Calculate the conform for the current row..
+      for( int i=0 ; i<T->elem_count[row] ; ++i )
+         T->conform[row] += T->frq[ T->elem[(row)][i] ];
+
+      // If the current conform is the minimum, mark this row to be removed
+      if( T->conform[row] < min )
+      {
+         EnterCriticalSection(&cs);
+         if( T->conform[row] < min )
+         {
+            min = T->conform[row]; 
+         }
+         LeaveCriticalSection(&cs);
+      } 
+   }
+   return j;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -497,32 +542,38 @@ static inline bool find_min(TRSACT * T)
 #endif
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-   int min = LONG_MAX; //g_conform[T->rows_left[0]];
    INT min_row;
    INT i;
    INT loops_to_do = 0;
+   static int stat_max = LONG_MAX; // Just some big enough number
+   min = stat_max;
+
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
-   auto it_remove = T->rows_left.begin();
-   for(  std::vector<INT>::iterator it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+   auto size = T->rows_left.size();
+
+   TIMER_TYPE time = get_time();
+   if( break_point < 100000 )
+      break_point = calculate_conform( 0, 1, size, T);
+   else
    {
-#ifdef SORT
-      // Here is the part that makes this implementation quick:
-      // If the conform at time of the latest sort minus..
-      // ..loops_after_sort*nCol (which is the max possible change in conform)..
-      // ..is bigger than the already found minimum confom, there can't be a lower min..
-      // ..therefore we can quit the loop
-      if(g_conform[*it] - elems_removed >= min )
-         break;
-      
-#endif
-      // Calculate the conform for the current row..
-      for( i=0 ; i<T->elem_count[*it] ; ++i )
-         T->conform[*it] += T->frq[ T->elem[(*it)][i] ];
-      // If the current conform is the minimum, mark this row to be removed
-      if( T->conform[*it] < min ) { min = T->conform[*it]; it_remove = it; } 
-         ++loops_to_do; 
+      std::thread t1( calculate_conform, 0, 2, size, T);
+      std::thread t2( calculate_conform, 1, 2, size, T);
+      std::thread t3( calculate_conform, 2, 4, size, T);
+      std::thread t4( calculate_conform, 3, 4, size, T);
+      t1.join();
+      t2.join();
+      t3.join();
+      t4.join();
+   }
+
+   g_timeForConform += (double)(get_time()-time)/(double)g_quadPart;
+
+   auto it_remove = T->rows_left.begin();
+   for ( ;it_remove!=T->rows_left.end() ; it_remove++)
+   {
+      if ( T->conform[*it_remove]==min ) break;
    }
 
    min_row = *it_remove;
@@ -633,11 +684,12 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
-   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt";
+   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
+   const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -651,6 +703,7 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&TRows);
 
+   InitializeCriticalSection(&cs);
    minus(&TRows);
    // print_table_data(&TRows);   
    /*/ For debugging only columns
