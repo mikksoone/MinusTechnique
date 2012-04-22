@@ -120,8 +120,7 @@ char *realloc_memory (char *p, int sizof, size_t siz, size_t *org_siz){
 
 /* Compare routine for partial sort, currently not used */
 int psort_cmp_conform (const INT x, const INT y){
-  if ( g_conform[x] <= g_conform[y] ) return (-1);
-  else return ( g_conform[x] > g_conform[y] );
+  return (g_conform[x] < g_conform[y]);
 }
 /* Compare routine for qsort, reorders row items based on their conform */
 int qsort_cmp_conform (const void *x, const void *y){
@@ -481,13 +480,17 @@ static inline void sort(TRSACT * T)
    }
 
    // And here we sort the rows according to their conform values
-/*
+   bool bSorted = false;
 #ifdef _WIN32
-   Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+   if( nRows > 100000 )
+   {
+      Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+      bSorted = true;
+   }
 #endif
-*/
    //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
-   std::sort( T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+   if( !bSorted )
+      std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_sort_time = get_time() - start_time;
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
@@ -512,7 +515,7 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
       // ..therefore we can quit the loop
       if(g_conform[row] - elems_removed >= min )
       {
-         fprintf(debug, "%d\n", j+1);
+         //fprintf(debug, "%d\n", j+1);
          return j;
       }
 #endif
@@ -551,10 +554,11 @@ static inline bool find_min(TRSACT * T)
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nNodes, "g_conform");
 #endif
+   
    auto size = T->rows_left.size();
 
    TIMER_TYPE time = get_time();
-   if( break_point < 100000 )
+   if( break_point < 100000  )
       break_point = calculate_conform( 0, 1, size, T);
    else
    {
@@ -575,7 +579,7 @@ static inline bool find_min(TRSACT * T)
    {
       if ( T->conform[*it_remove]==min ) break;
    }
-
+   
    min_row = *it_remove;
    // printf(" m=%d ", min_row);
 #ifdef PRINT_DEBUG
