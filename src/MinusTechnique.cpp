@@ -57,10 +57,12 @@ namespace
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
+   int      break_point       = 0;
    int      nRow              = 0;
    int      nCol              = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
+   double   g_timeForConform  = 0;
    double   g_timePerLine     = LLONG_MAX;
    bool     g_bSort           = 0;
    FILE     *debug            = 0;
@@ -343,12 +345,13 @@ static inline void sort(TRSACT * T)
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
+   break_point = 0;
 }
 
-void calculate_conform(int j, int increment, int size, TRSACT * T)
+inline int calculate_conform(int j, int increment, int size, TRSACT * T)
 {
    if( j >= size )
-      return;
+      return j;
    for( ; j < size ; j+=increment )
    {
       auto row = T->rows_left[j];
@@ -359,7 +362,10 @@ void calculate_conform(int j, int increment, int size, TRSACT * T)
       // ..is bigger than the already found minimum confom, there can't be a lower min..
       // ..therefore we can quit the loop
       if(g_conform[row] - loops_after_sort*nCol > min )
-         break;
+      {
+         //fprintf(debug, "%d\n", j+1);
+         return j;
+      }
 #endif
       // Calculate the conform for the current row..
       for( int i=0 ; i<nCol ; i++ )
@@ -376,6 +382,7 @@ void calculate_conform(int j, int increment, int size, TRSACT * T)
          LeaveCriticalSection(&cs);
       } 
    }
+   return j;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -385,6 +392,7 @@ static inline bool find_min(TRSACT * T)
    TIMER("find_min");
 #endif
    static TIMER_TYPE start_time = 0;
+
    start_time = get_time();
    static int stat_max = nCol*nRow; // Just some big enough number
    min = stat_max;
@@ -396,39 +404,24 @@ static inline bool find_min(TRSACT * T)
 #endif
    auto size = T->rows_left.size();
 
-   std::thread t1( calculate_conform, 0, 4, size, T);
-   std::thread t2( calculate_conform, 1, 4, size, T);
-   std::thread t3( calculate_conform, 2, 4, size, T);
-   std::thread t4( calculate_conform, 3, 4, size, T);
-   t1.join();
-   t2.join();
-   t3.join();
-   t4.join();
    
-   /*
-   for( auto j = 0 ; j < size ; ++j )
+   TIMER_TYPE time = get_time();
+   if( break_point < 10000 )
+      break_point = calculate_conform( 0, 1, size, T);
+   else
    {
-      auto row = T->rows_left[j];
-#ifdef SORT
-      // Here is the part that makes this implementation quick:
-      // If the conform at time of the latest sort minus..
-    // ..loops_after_sort*nCol (which is the max possible change in conform)..
-      // ..is bigger than the already found minimum confom, there can't be a lower min..
-      // ..therefore we can quit the loop
-      if(g_conform[row] - loops_after_sort*nCol > min )
-         break;
-#endif
-      // Calculate the conform for the current row..
-      for( i=0 ; i<nCol ; i++ )
-         T->conform[row] += T->frq[i][ T->buf[(row)*nCol +i] ];
-
-      // If the current conform is the minimum, mark this row to be removed
-      if( T->conform[row] < min )
-      { 
-         min = T->conform[row]; 
-      } 
+      std::thread t1( calculate_conform, 0, 4, size, T);
+      std::thread t2( calculate_conform, 1, 4, size, T);
+      std::thread t3( calculate_conform, 2, 4, size, T);
+      std::thread t4( calculate_conform, 3, 4, size, T);
+      t1.join();
+      t2.join();
+      t3.join();
+      t4.join();
    }
-   */
+
+   g_timeForConform += (double)(get_time()-time)/(double)g_quadPart;
+
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
@@ -443,23 +436,23 @@ static inline bool find_min(TRSACT * T)
    printf( "row=%d conform=%d\n", min_row, T->conform[min_row] );
    print_int_arr(&T->buf[min_row*nCol], nCol, "eliminated row");
 #endif
-   if( loops_after_sort % 10 == 0 )
+   //if( loops_after_sort == 0 )
    {
-      TIMER_TYPE timeSinceSort = get_time() - g_timeWhenSorted;
-      double secondsSinceSort = (get_time() - g_timeWhenSorted ) / (double) g_quadPart;
       double timePerLine =  (get_time() - g_timeWhenSorted ) / (double) (loops_after_sort);
       if ( timePerLine > g_timePerLine )
          g_bSort = true;
 
       g_timePerLine = timePerLine;
       static TIMER_TYPE interval_time = get_time();
-      TIMER_TYPE total_time = get_time() - interval_time;
-
-      double total_seconds = (double)total_time/(double)g_quadPart;
-      interval_time = get_time();
       static int cnt = 0;
-	  if( ++cnt % 100 == 0 )
-		printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
+	   if( ++cnt % 5000 == 0 )
+      {
+         TIMER_TYPE total_time = get_time() - interval_time;
+
+         double total_seconds = (double)total_time/(double)g_quadPart;
+         interval_time = get_time();
+		   printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
+      }
    }
    // Remove the min row from the vector of rows left      
    T->rows_left.erase( it_remove );
@@ -578,7 +571,7 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds \n", total_seconds);
+   printf("Finished in about %4.2f seconds konform=%4.2f\n", total_seconds, g_timeForConform);
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
