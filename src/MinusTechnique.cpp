@@ -13,6 +13,7 @@
 #include <string.h>
 #include <algorithm>
 #include <vector>
+#include <atomic>
 #include <climits>
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
@@ -66,6 +67,7 @@ namespace
    TIMER_TYPE g_sort_time     = 0;
    TIMER_TYPE g_timeWhenSorted= 0;
    TIMER_TYPE start_time      = 0;
+   CRITICAL_SECTION cs;
 }
 
 static inline void sort(TRSACT * T);
@@ -349,35 +351,46 @@ static inline bool find_min(TRSACT * T)
 #endif
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-   static  std::vector<INT>::iterator it_remove = T->rows_left.begin();
    static int stat_max = nCol*nRow; // Just some big enough number
-   INT min = stat_max;
+   int min = stat_max;
    INT min_row;
    INT i;
    INT loops_to_do = 0;
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nRow, "g_conform");
 #endif
-   for(  std::vector<INT>::iterator it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+   auto size = T->rows_left.size();
+   for( auto j = 0 ; j < size ; ++j )
    {
+      auto row = T->rows_left[j];
 #ifdef SORT
       // Here is the part that makes this implementation quick:
       // If the conform at time of the latest sort minus..
     // ..loops_after_sort*nCol (which is the max possible change in conform)..
       // ..is bigger than the already found minimum confom, there can't be a lower min..
       // ..therefore we can quit the loop
-      if(g_conform[*it] - loops_after_sort*nCol > min )
+      if(g_conform[row] - loops_after_sort*nCol > min )
          break;
 #endif
       // Calculate the conform for the current row..
       for( i=0 ; i<nCol ; i++ )
-         T->conform[*it] += T->frq[i][ T->buf[(*it)*nCol +i] ];
+         T->conform[row] += T->frq[i][ T->buf[(row)*nCol +i] ];
+
       // If the current conform is the minimum, mark this row to be removed
-      if( T->conform[*it] < min ) { min = T->conform[*it]; it_remove = it; } 
-         ++loops_to_do; 
+      if( T->conform[row] < min )
+      { 
+         min = T->conform[row]; 
+      } 
+   }
+   
+   auto it_remove = T->rows_left.begin();
+   for ( ;it_remove!=T->rows_left.end() ; it_remove++)
+   {
+      if ( T->conform[*it_remove]==min ) break;
    }
 
    min_row = *it_remove;
+//   printf("min_row=%d conform=%d\n", min_row, T->conform[min_row]);
    ++loops_after_sort;
 #ifdef PRINT_DEBUG
    print_int_arr(T->conform, nRow, "conform");
@@ -405,11 +418,12 @@ static inline bool find_min(TRSACT * T)
    // Remove the min row from the vector of rows left      
    T->rows_left.erase( it_remove );
 
+   // Remember the row kicked out
+   T->seq[ T->seq_count++ ] = min_row;
+
    if ( T->rows_left.empty() )
       return false; //The end
 
-   // Remember the row kicked out
-   T->seq[ T->seq_count++ ] = min_row;
    // Update the frequency table
    for( i=0 ; i<nCol ; i++ )
       --T->frq[i][ T->buf[min_row*nCol + i] ];
@@ -486,8 +500,8 @@ int main(int argc, char* argv[])
    const char * inFileName = argv[1];
    const char * outFileName = argv[2];
 #else
-   const char * inFileName = "C:\\Users\\Mikk\\data\\connect_monsa.txt";
-   const char * outFileName = "C:\\Users\\Mikk\\data\\connect_monsa.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.dat";
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -497,6 +511,7 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&T);
 
+   InitializeCriticalSection(&cs);
    minus(&T);
 
    // Because didn't want to program a separate minus function for doing the horizontal removal..
