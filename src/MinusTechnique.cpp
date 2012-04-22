@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 #include <atomic>
+#include <thread>
 #include <climits>
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
@@ -68,6 +69,7 @@ namespace
    TIMER_TYPE g_timeWhenSorted= 0;
    TIMER_TYPE start_time      = 0;
    CRITICAL_SECTION cs;
+   std::atomic<int> min       = 0;
 }
 
 static inline void sort(TRSACT * T);
@@ -343,6 +345,39 @@ static inline void sort(TRSACT * T)
    elems_removed = 0;
 }
 
+void calculate_conform(int j, int increment, int size, TRSACT * T)
+{
+   if( j >= size )
+      return;
+   for( ; j < size ; j+=increment )
+   {
+      auto row = T->rows_left[j];
+#ifdef SORT
+      // Here is the part that makes this implementation quick:
+      // If the conform at time of the latest sort minus..
+    // ..loops_after_sort*nCol (which is the max possible change in conform)..
+      // ..is bigger than the already found minimum confom, there can't be a lower min..
+      // ..therefore we can quit the loop
+      if(g_conform[row] - loops_after_sort*nCol > min )
+         break;
+#endif
+      // Calculate the conform for the current row..
+      for( int i=0 ; i<nCol ; i++ )
+         T->conform[row] += T->frq[i][ T->buf[(row)*nCol +i] ];
+
+      // If the current conform is the minimum, mark this row to be removed
+      if( T->conform[row] < min )
+      {
+         EnterCriticalSection(&cs);
+         if( T->conform[row] < min )
+         {
+            min = T->conform[row]; 
+         }
+         LeaveCriticalSection(&cs);
+      } 
+   }
+}
+
 /* Routine for finding the row with minimum conform */
 static inline bool find_min(TRSACT * T)
 {
@@ -352,7 +387,7 @@ static inline bool find_min(TRSACT * T)
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
    static int stat_max = nCol*nRow; // Just some big enough number
-   int min = stat_max;
+   min = stat_max;
    INT min_row;
    INT i;
    INT loops_to_do = 0;
@@ -360,6 +395,17 @@ static inline bool find_min(TRSACT * T)
    print_int_arr(g_conform, nRow, "g_conform");
 #endif
    auto size = T->rows_left.size();
+
+   std::thread t1( calculate_conform, 0, 4, size, T);
+   std::thread t2( calculate_conform, 1, 4, size, T);
+   std::thread t3( calculate_conform, 2, 4, size, T);
+   std::thread t4( calculate_conform, 3, 4, size, T);
+   t1.join();
+   t2.join();
+   t3.join();
+   t4.join();
+   
+   /*
    for( auto j = 0 ; j < size ; ++j )
    {
       auto row = T->rows_left[j];
@@ -382,7 +428,7 @@ static inline bool find_min(TRSACT * T)
          min = T->conform[row]; 
       } 
    }
-   
+   */
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
