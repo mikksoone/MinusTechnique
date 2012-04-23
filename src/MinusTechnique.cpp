@@ -71,6 +71,7 @@ namespace
    double   g_timePerLine     = LLONG_MAX;
    bool     g_bSort           = 0;
    bool     g_dontSkip        = 0;
+   int g_average_break_point  = 0;
 #ifdef DEBUG_STATUS_TO_FILE
    FILE     *debug            = 0;
 #endif
@@ -515,7 +516,7 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
       // ..therefore we can quit the loop
       if(g_conform[row] - elems_removed >= min )
       {
-         //fprintf(debug, "%d\n", j+1);
+         fprintf(debug, "%d\n", j+1);
          return j;
       }
 #endif
@@ -556,14 +557,14 @@ static inline bool find_min(TRSACT * T)
 #endif
    
    auto size = T->rows_left.size();
-
+   
    TIMER_TYPE time = get_time();
-   if( break_point < 100000  )
+   if( break_point < 100000 )
       break_point = calculate_conform( 0, 1, size, T);
    else
    {
-      std::thread t1( calculate_conform, 0, 2, size, T);
-      std::thread t2( calculate_conform, 1, 2, size, T);
+      std::thread t1( calculate_conform, 0, 4, size, T);
+      std::thread t2( calculate_conform, 1, 4, size, T);
       std::thread t3( calculate_conform, 2, 4, size, T);
       std::thread t4( calculate_conform, 3, 4, size, T);
       t1.join();
@@ -571,6 +572,7 @@ static inline bool find_min(TRSACT * T)
       t3.join();
       t4.join();
    }
+   g_average_break_point += break_point;
 
    g_timeForConform += (double)(get_time()-time)/(double)g_quadPart;
 
@@ -690,10 +692,10 @@ int main(int argc, char* argv[])
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
-   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
-   const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
+   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
+   //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -742,7 +744,7 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds \n", total_seconds);
+   printf("Finished in about %4.2f seconds, break_point=%d\n", total_seconds, g_average_break_point/nCols );
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
