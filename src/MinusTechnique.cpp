@@ -32,7 +32,7 @@
 #define DEBUG_STATUS_TO_FILE
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
-
+#define MAX_THREADS 4
 #define HARDCODED_DATA // If we don't want to specify input/output files 
 
 // The timers in windows and linux are different
@@ -496,12 +496,14 @@ static inline void sort(TRSACT * T)
    //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
    if( !bSorted )
       std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
-   g_sort_time = get_time() - start_time;
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
    g_dontSkip=0;
+   g_timeForConform=0;
+   g_sort_time = get_time() - start_time;
+   g_totalSortTime += (double)g_sort_time/(double)g_quadPart;
 }
 
 inline int calculate_conform(int j, int increment, int size, TRSACT * T)
@@ -543,13 +545,14 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
 
 int calculateThreadCount(double oldTimeForConform, int nThread)
 {
-   if( ++nThread > 4 )
-      return 4;
+   if( ++nThread > MAX_THREADS )
+      return MAX_THREADS;
    double nextConformTimeGuess = g_timeForConform/g_thread_coef[nThread-2] + nThread*g_threadCreateTime;
    if( nextConformTimeGuess < oldTimeForConform )
       return calculateThreadCount( nextConformTimeGuess, nThread );
    return nThread-1;
 }
+
 /* Routine for finding the row with minimum conform */
 static inline bool find_min(TRSACT * T)
 {
@@ -573,7 +576,7 @@ static inline bool find_min(TRSACT * T)
    g_nThreads = calculateThreadCount(g_timeForConform, 1);
 
    TIMER_TYPE time = get_time();
-   if( g_nThreads == 1 || 2+2==4 )
+   if( g_nThreads == 1 /*|| 2+2==4*/ )
    {
       calculate_conform( 0, 1, size, T);
    }else
@@ -741,12 +744,12 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
-   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
-   //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
+   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
+   const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
