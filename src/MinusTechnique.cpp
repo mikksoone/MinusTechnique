@@ -25,7 +25,7 @@
 // #define PRINT_DEBUG
 #define DEBUG_STATUS_TO_FILE
 
-#define SORT          // Could be undef if one want's to compare time differences
+//#define SORT          // Could be undef if one want's to compare time differences
 #define MIN_ITEM 0    // If lowest item is 1, lower every item by 1
 #define INT int       // Maybe a double is needed?
 
@@ -63,6 +63,7 @@ namespace
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
    double   g_timeForConform  = 0;
+   double   g_timeForTotalConform=0;
    double   g_timePerLine     = LLONG_MAX;
    double   g_threadCreateTime =0;
    bool     g_bSort           = 0;
@@ -428,7 +429,7 @@ static inline bool find_min(TRSACT * T)
       calculate_conform( 0, 1, size, T);
    }else
    {
-      printf("g_nThreads=%d\n", g_nThreads);
+      //printf("g_nThreads=%d\n", g_nThreads);
       std::vector<std::thread> threads;
       for(i=0; i<g_nThreads; ++i)
       {
@@ -444,7 +445,7 @@ static inline bool find_min(TRSACT * T)
    ++g_break_count;
    g_average_break_point += g_break_point;
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart)-g_nThreads*g_threadCreateTime;
-
+   g_timeForTotalConform += g_timeForConform+g_nThreads*g_threadCreateTime;
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
@@ -614,7 +615,7 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds, konform=%4.2f, break_point=%d, break_count=%d \n", total_seconds, g_timeForConform, g_average_break_point/nCol, g_break_count );
+   printf("Finished in about %4.2f seconds, konform=%4.2f, break_point=%d, break_count=%d \n", total_seconds, g_timeForTotalConform, g_average_break_point/nCol, g_break_count );
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
