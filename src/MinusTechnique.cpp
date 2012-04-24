@@ -550,6 +550,7 @@ void test_thread()
 
 void global_init()
 {
+   TIMER_TYPE start_time = get_time();
 #ifdef _WIN32
    LARGE_INTEGER timerFreq;
    QueryPerformanceFrequency(&timerFreq);
@@ -576,9 +577,10 @@ void global_init()
       std::thread t( test_thread );
       t.join();
    }
-   g_threadCreateTime = (double)(get_time()-threadLoopStartTime) / (double) g_quadPart / 1000;
+   TIMER_TYPE end_time = get_time();
+   g_threadCreateTime = (double)(end_time-threadLoopStartTime) / (double) g_quadPart / 1000;
    
-   printf("thread_create_time=%.6f\n", g_threadCreateTime);
+   printf("init_time=%4.2f, thread_create_time=%.6f\n", (double)(end_time-start_time) /(double) g_quadPart,  g_threadCreateTime);
 
 }
 
