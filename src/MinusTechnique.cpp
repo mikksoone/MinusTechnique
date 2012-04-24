@@ -57,14 +57,18 @@ namespace
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
-   int      break_point       = 0;
+   int      g_break_point     = 0;
    int      nRow              = 0;
    int      nCol              = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
    double   g_timeForConform  = 0;
    double   g_timePerLine     = LLONG_MAX;
+   double   g_threadCreateTime =0;
    bool     g_bSort           = 0;
+   int      g_break_count     = 0;
+   int      g_nThreads        = 0;
+   int g_average_break_point  = 0;
    FILE     *debug            = 0;
    // Timer data
    TIMER_TYPE g_sort_time     = 0;
@@ -72,6 +76,7 @@ namespace
    TIMER_TYPE start_time      = 0;
    CRITICAL_SECTION cs;
    std::atomic<int> min       = 0;
+   std::vector<double> g_thread_coef;
 }
 
 static inline void sort(TRSACT * T);
@@ -345,7 +350,8 @@ static inline void sort(TRSACT * T)
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
-   break_point = 0;
+   g_break_point = 0;
+   g_timeForConform=0;
 }
 
 inline int calculate_conform(int j, int increment, int size, TRSACT * T)
@@ -385,6 +391,16 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
    return j;
 }
 
+int calculateThreadCount(double oldTimeForConform, int nThread)
+{
+   if( ++nThread > 4 )
+      return 4;
+   double nextConformTimeGuess = g_timeForConform/g_thread_coef[nThread-2] + nThread*g_threadCreateTime;
+   if( nextConformTimeGuess < oldTimeForConform )
+      return calculateThreadCount( nextConformTimeGuess, nThread );
+   return nThread-1;
+}
+
 /* Routine for finding the row with minimum conform */
 static inline bool find_min(TRSACT * T)
 {
@@ -403,24 +419,31 @@ static inline bool find_min(TRSACT * T)
    print_int_arr(g_conform, nRow, "g_conform");
 #endif
    auto size = T->rows_left.size();
-
    
-   TIMER_TYPE time = get_time();
-   if( break_point < 10000 )
-      break_point = calculate_conform( 0, 1, size, T);
-   else
-   {
-      std::thread t1( calculate_conform, 0, 4, size, T);
-      std::thread t2( calculate_conform, 1, 4, size, T);
-      std::thread t3( calculate_conform, 2, 4, size, T);
-      std::thread t4( calculate_conform, 3, 4, size, T);
-      t1.join();
-      t2.join();
-      t3.join();
-      t4.join();
-   }
+   g_nThreads = calculateThreadCount(g_timeForConform, 1);
 
-   g_timeForConform += (double)(get_time()-time)/(double)g_quadPart;
+   TIMER_TYPE time = get_time();
+   if( g_nThreads == 1 /*|| 2+2==4*/ )
+   {
+      calculate_conform( 0, 1, size, T);
+   }else
+   {
+      printf("g_nThreads=%d\n", g_nThreads);
+      std::vector<std::thread> threads;
+      for(i=0; i<g_nThreads; ++i)
+      {
+         threads.push_back( std::thread(calculate_conform, i, g_nThreads, size, T) );
+      }
+      for(i=0; i<g_nThreads; ++i)
+      {
+         threads[i].join();
+      }
+   }
+ 
+   if ( (double)(get_time()-time)/(double)g_quadPart )
+   ++g_break_count;
+   g_average_break_point += g_break_point;
+   g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart)-g_nThreads*g_threadCreateTime;
 
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
@@ -441,7 +464,8 @@ static inline bool find_min(TRSACT * T)
       double timePerLine =  (get_time() - g_timeWhenSorted ) / (double) (loops_after_sort);
       if ( timePerLine > g_timePerLine )
          g_bSort = true;
-
+      //if( g_break_count % 100 == 0)
+      //   g_bSort = true;
       g_timePerLine = timePerLine;
       static TIMER_TYPE interval_time = get_time();
       static int cnt = 0;
@@ -451,7 +475,7 @@ static inline bool find_min(TRSACT * T)
 
          double total_seconds = (double)total_time/(double)g_quadPart;
          interval_time = get_time();
-		   printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), total_seconds, T->conform[min_row] );
+		   printf( "rows_left=%d seconds=%4.2f conform=%d nThreads=%d, conform_time=%.6f\n",T->rows_left.size(), total_seconds, T->conform[min_row], g_nThreads, g_timeForConform );
       }
    }
    // Remove the min row from the vector of rows left      
@@ -516,6 +540,12 @@ void minus(TRSACT * T)
    // minus(T); 
 }
 
+//dummy thread to measure thread execution time
+void test_thread()
+{
+
+}
+
 /* main main*/
 int main(int argc, char* argv[])
 {
@@ -551,6 +581,19 @@ int main(int argc, char* argv[])
    TRSACT_init(&T);
 
    InitializeCriticalSection(&cs);
+   g_thread_coef.reserve(3);
+   g_thread_coef.push_back(1.7);
+   g_thread_coef.push_back(2.42);
+   g_thread_coef.push_back(2.88);
+   TIMER_TYPE threadLoopStartTime = get_time();
+   
+   for(int i = 0; i<1000; ++i)
+   {
+      std::thread t( test_thread );
+      t.join();
+   }
+   g_threadCreateTime = (double)(get_time()-threadLoopStartTime) / (double) g_quadPart / 1000;
+   printf("thread_create_time=%.6f\n", g_threadCreateTime);
    minus(&T);
 
    // Because didn't want to program a separate minus function for doing the horizontal removal..
@@ -571,7 +614,7 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds konform=%4.2f\n", total_seconds, g_timeForConform);
+   printf("Finished in about %4.2f seconds, konform=%4.2f, break_point=%d, break_count=%d \n", total_seconds, g_timeForConform, g_average_break_point/nCol, g_break_count );
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
