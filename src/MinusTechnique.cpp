@@ -62,15 +62,18 @@ namespace
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
-   int      break_point       = 0;
    int      nRows             = 0;
    int      nCols             = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
    double   g_timeForConform  = 0;
+   double   g_timeForTotalConform=0;
+   double   g_totalSortTime    = 0;
    double   g_timePerLine     = LLONG_MAX;
+   double   g_threadCreateTime =0;
    bool     g_bSort           = 0;
    bool     g_dontSkip        = 0;
+   int      g_nThreads        = 0;
    int g_average_break_point  = 0;
 #ifdef DEBUG_STATUS_TO_FILE
    FILE     *debug            = 0;
@@ -81,6 +84,7 @@ namespace
    TIMER_TYPE start_time      = 0;
    CRITICAL_SECTION cs;
    std::atomic<int> min       = 0;
+   std::vector<double> g_thread_coef;
 }
 
 static inline void sort(TRSACT * T);
@@ -497,7 +501,6 @@ static inline void sort(TRSACT * T)
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
-   break_point = 0;
    g_dontSkip=0;
 }
 
@@ -538,6 +541,15 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
    return j;
 }
 
+int calculateThreadCount(double oldTimeForConform, int nThread)
+{
+   if( ++nThread > 4 )
+      return 4;
+   double nextConformTimeGuess = g_timeForConform/g_thread_coef[nThread-2] + nThread*g_threadCreateTime;
+   if( nextConformTimeGuess < oldTimeForConform )
+      return calculateThreadCount( nextConformTimeGuess, nThread );
+   return nThread-1;
+}
 /* Routine for finding the row with minimum conform */
 static inline bool find_min(TRSACT * T)
 {
@@ -558,24 +570,29 @@ static inline bool find_min(TRSACT * T)
    
    auto size = T->rows_left.size();
    
+   g_nThreads = calculateThreadCount(g_timeForConform, 1);
+
    TIMER_TYPE time = get_time();
-   if( break_point < 100000 )
-      break_point = calculate_conform( 0, 1, size, T);
-   else
+   if( g_nThreads == 1 || 2+2==4 )
    {
-      std::thread t1( calculate_conform, 0, 4, size, T);
-      std::thread t2( calculate_conform, 1, 4, size, T);
-      std::thread t3( calculate_conform, 2, 4, size, T);
-      std::thread t4( calculate_conform, 3, 4, size, T);
-      t1.join();
-      t2.join();
-      t3.join();
-      t4.join();
+      calculate_conform( 0, 1, size, T);
+   }else
+   {
+      //printf("g_nThreads=%d\n", g_nThreads);
+      std::vector<std::thread> threads;
+      for(i=0; i<g_nThreads; ++i)
+      {
+         threads.push_back( std::thread(calculate_conform, i, g_nThreads, size, T) );
+      }
+      for(i=0; i<g_nThreads; ++i)
+      {
+         threads[i].join();
+      }
    }
-   g_average_break_point += break_point;
-
-   g_timeForConform += (double)(get_time()-time)/(double)g_quadPart;
-
+ 
+   if ( (double)(get_time()-time)/(double)g_quadPart )
+   g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart)-g_nThreads*g_threadCreateTime;
+   g_timeForTotalConform += g_timeForConform+g_nThreads*g_threadCreateTime;
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
@@ -667,10 +684,15 @@ void minus(TRSACT * T)
    // minus(T); 
 }
 
-/* main main*/
-int main(int argc, char* argv[])
+//dummy thread to measure thread execution time
+void test_thread()
 {
-  start_time = get_time();
+
+}
+
+void global_init()
+{
+   TIMER_TYPE start_time = get_time();
 #ifdef _WIN32
    LARGE_INTEGER timerFreq;
    QueryPerformanceFrequency(&timerFreq);
@@ -679,7 +701,36 @@ int main(int argc, char* argv[])
 #ifdef DEBUG_STATUS_TO_FILE
    debug = fopen ("debug.out","w");
    if( !debug ) { printf("file open err\n"); exit(1); }
+	fprintf(debug, "start..\n");
+	fflush(debug);
 #endif
+  
+   // For thread creations 
+   InitializeCriticalSection(&cs);
+   g_thread_coef.reserve(3);
+   g_thread_coef.push_back(1.7);
+   g_thread_coef.push_back(2.42);
+   g_thread_coef.push_back(2.88);
+
+   TIMER_TYPE threadLoopStartTime = get_time();
+   
+   for(int i = 0; i<1000; ++i)
+   {
+      std::thread t( test_thread );
+      t.join();
+   }
+   TIMER_TYPE end_time = get_time();
+   g_threadCreateTime = (double)(end_time-threadLoopStartTime) / (double) g_quadPart / 1000;
+   
+   printf("init_time=%4.2f, thread_create_time=%.6f\n", (double)(end_time-start_time) /(double) g_quadPart,  g_threadCreateTime);
+
+}
+
+/* main main*/
+int main(int argc, char* argv[])
+{
+  start_time = get_time();
+  global_init();
 #ifndef HARDCODED_DATA
    if( argc < 3 )
    {
@@ -690,10 +741,10 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
    //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
@@ -744,7 +795,7 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds, break_point=%d\n", total_seconds, g_average_break_point/nCols );
+   printf("Finished in about %4.2f seconds, konform=%4.2f, sort=%4.2f\n", total_seconds, g_timeForTotalConform, g_totalSortTime );
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
