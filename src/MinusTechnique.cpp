@@ -25,7 +25,7 @@
 // #define PRINT_DEBUG
 #define DEBUG_STATUS_TO_FILE
 
-//#define SORT          // Could be undef if one want's to compare time differences
+#define SORT          // Could be undef if one want's to compare time differences
 #define MIN_ITEM 0    // If lowest item is 1, lower every item by 1
 #define INT int       // Maybe a double is needed?
 
@@ -64,10 +64,10 @@ namespace
    double   g_quadPart        = 0;
    double   g_timeForConform  = 0;
    double   g_timeForTotalConform=0;
+   double   g_totalSortTime    = 0;
    double   g_timePerLine     = LLONG_MAX;
    double   g_threadCreateTime =0;
    bool     g_bSort           = 0;
-   int      g_break_count     = 0;
    int      g_nThreads        = 0;
    int g_average_break_point  = 0;
    FILE     *debug            = 0;
@@ -346,13 +346,15 @@ static inline void sort(TRSACT * T)
    // Sort the rows
   // And here we sort the rows according to their conform values
 	std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
-   g_sort_time = get_time() - start_time;
+   
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
    g_break_point = 0;
    g_timeForConform=0;
+   g_sort_time = get_time() - start_time;
+   g_totalSortTime += (double)g_sort_time/(double)g_quadPart;
 }
 
 inline int calculate_conform(int j, int increment, int size, TRSACT * T)
@@ -442,7 +444,6 @@ static inline bool find_min(TRSACT * T)
    }
  
    if ( (double)(get_time()-time)/(double)g_quadPart )
-   ++g_break_count;
    g_average_break_point += g_break_point;
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart)-g_nThreads*g_threadCreateTime;
    g_timeForTotalConform += g_timeForConform+g_nThreads*g_threadCreateTime;
@@ -547,11 +548,8 @@ void test_thread()
 
 }
 
-/* main main*/
-int main(int argc, char* argv[])
+void global_init()
 {
-   TRSACT T;
-   start_time = get_time();
 #ifdef _WIN32
    LARGE_INTEGER timerFreq;
    QueryPerformanceFrequency(&timerFreq);
@@ -559,8 +557,38 @@ int main(int argc, char* argv[])
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
    debug = fopen ("debug.out","w");
-#endif
    if( !debug ) { printf("file open err\n"); exit(1); }
+	fprintf(debug, "start..\n");
+	fflush(debug);
+#endif
+  
+   // For thread creations 
+   InitializeCriticalSection(&cs);
+   g_thread_coef.reserve(3);
+   g_thread_coef.push_back(1.7);
+   g_thread_coef.push_back(2.42);
+   g_thread_coef.push_back(2.88);
+
+   TIMER_TYPE threadLoopStartTime = get_time();
+   
+   for(int i = 0; i<1000; ++i)
+   {
+      std::thread t( test_thread );
+      t.join();
+   }
+   g_threadCreateTime = (double)(get_time()-threadLoopStartTime) / (double) g_quadPart / 1000;
+   
+   printf("thread_create_time=%.6f\n", g_threadCreateTime);
+
+}
+
+/* main main*/
+int main(int argc, char* argv[])
+{
+   TRSACT T;
+   start_time = get_time();
+   global_init();
+
 #ifndef HARDCODED_DATA
    if( argc < 3 )
    {
@@ -573,28 +601,11 @@ int main(int argc, char* argv[])
    const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.dat";
    const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.out";
 #endif
-#ifdef DEBUG_STATUS_TO_FILE
-	fprintf(debug, "start..\n");
-	fflush(debug);
-#endif
+
    TRSACT_file_load(&T, inFileName);
 
    TRSACT_init(&T);
 
-   InitializeCriticalSection(&cs);
-   g_thread_coef.reserve(3);
-   g_thread_coef.push_back(1.7);
-   g_thread_coef.push_back(2.42);
-   g_thread_coef.push_back(2.88);
-   TIMER_TYPE threadLoopStartTime = get_time();
-   
-   for(int i = 0; i<1000; ++i)
-   {
-      std::thread t( test_thread );
-      t.join();
-   }
-   g_threadCreateTime = (double)(get_time()-threadLoopStartTime) / (double) g_quadPart / 1000;
-   printf("thread_create_time=%.6f\n", g_threadCreateTime);
    minus(&T);
 
    // Because didn't want to program a separate minus function for doing the horizontal removal..
@@ -615,7 +626,7 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds, konform=%4.2f, break_point=%d, break_count=%d \n", total_seconds, g_timeForTotalConform, g_average_break_point/nCol, g_break_count );
+   printf("Finished in about %4.2f seconds, konform=%4.2f, sort=%4.2f\n", total_seconds, g_timeForTotalConform, g_totalSortTime );
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
