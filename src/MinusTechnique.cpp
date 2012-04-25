@@ -15,6 +15,7 @@
 #include <vector>
 #include <atomic>
 #include <thread>
+#include <future>
 #include <climits>
 // Neat profiler that currently isn't available for everyone
 // Therefore it's commented out for the git
@@ -57,9 +58,8 @@ namespace
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
    int      elems_removed     = 0;
-   int      g_break_point     = 0;
-   int      nRow              = 0;
-   int      nCol              = 0;
+   int      nRows             = 0;
+   int      nCols             = 0;
    INT      *g_conform        = 0;
    double   g_quadPart        = 0;
    double   g_timeForConform  = 0;
@@ -87,7 +87,7 @@ static inline void sort(TRSACT * T);
 void print_int_arr(INT *arr, INT len, const char *name){
    INT i;
    //return;
-   for( i=0 ; i<len ; i++){
+   for( i=0 ; i<len ; ++i){
       printf("%d ", arr[i]);
    }
    printf ("==%s==========\n", name);
@@ -97,7 +97,7 @@ void print_int_arr(INT *arr, INT len, const char *name){
 char *alloc_memory (size_t siz){
   char *p = (char *)calloc (siz, 1);
   if ( p == NULL ){
-    printf ("out of memory\n");
+    printf ("out of memory %d\n", GetLastError());
     exit (1);
   }
   return (p);
@@ -111,15 +111,14 @@ char *realloc_memory (char *p, int sizof, size_t siz, size_t *org_siz){
     printf ("out of memory\n");
     exit (1);
   }
-  for ( i=(*org_siz)*sizof ; i<siz*sizof ; i++ ) p[i] = 0;
+  for ( i=(*org_siz)*sizof ; i<siz*sizof ; ++i ) p[i] = 0;
   *org_siz = siz;
   return (p);
 }
 
 /* Compare routine for partial sort, currently not used */
 int psort_cmp_conform (const INT x, const INT y){
-  if ( g_conform[x] <= g_conform[y] ) return (-1);
-  else return ( g_conform[x] > g_conform[y] );
+  return (g_conform[x] < g_conform[y]);
 }
 /* Compare routine for qsort, reorders row items based on their conform */
 int qsort_cmp_conform (const void *x, const void *y){
@@ -127,6 +126,14 @@ int qsort_cmp_conform (const void *x, const void *y){
   else return ( g_conform[*((INT *)x)] > g_conform[*((INT *)y)] );
 }
 
+class SortFunc
+{
+public:
+   bool operator()(int left, int right) const
+   {
+      return (g_conform[left] < g_conform[right]);
+   }
+};
 /* read an integer from the file (Takeaki Uno)*/
 INT FILE_read_int (FILE *fp){
   INT item;
@@ -159,12 +166,12 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    
    if ( !fp ){ printf ("file open error %d\n ", GetLastError() ); exit (1); }
    
-   nRow = FILE_read_int (fp);
+   nRows = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
-   nCol = FILE_read_int (fp);
+   nCols = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
    
-   T->buf = (INT *)alloc_memory ( sizeof(INT) * (nRow*nCol) );
+   T->buf = (INT *)alloc_memory ( sizeof(INT) * (nRows*nCols) );
    
    j = 0; //row id
    do 
@@ -175,7 +182,7 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
          item = FILE_read_int (fp);
          if ( (FILE_err&4) == 0)
          {  // got an item from the file before reaching to line-end
-            T->buf[j*nCol+i] = item-MIN_ITEM; //to get the elements started from 0
+            T->buf[j*nCols+i] = item-MIN_ITEM; //to get the elements started from 0
             i++;
          }
       } while ((FILE_err&3)==0);
@@ -196,11 +203,11 @@ void TRSACT_output_result(TRSACT * T, const char *fname)
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
 
-   for( i=0 ; i<nCol ; i++ )
+   for( i=0 ; i<nCols ; i++ )
    {
-      for( j=0 ; j<nRow ; j++) 
+      for( j=0 ; j<nRows ; j++) 
       {
-         fprintf( fp, "%d ", T->buf[ T->seq[j]*nCol+i ] + MIN_ITEM );
+         fprintf( fp, "%d ", T->buf[ T->seq[j]*nCols+i ] + MIN_ITEM );
       }
       fprintf(fp, "\n");
    }
@@ -231,41 +238,41 @@ void TRSACT_init( TRSACT * T )
    TIMER("init");
 #endif
    INT i,j;
-   T->col_max = (INT*) alloc_memory( sizeof( INT ) * nCol );
+   T->col_max = (INT*) alloc_memory( sizeof( INT ) * nCols );
 
-   for( j=0 ; j<nRow ; j++)
-      for( i=0 ; i<nCol ; i++ )
-         if ( T->buf[j*nCol + i] + 1 > T->col_max[i] )
-            T->col_max[i] = T->buf[j*nCol + i]+1; // Update the maximum item of col i
+   for( j=0 ; j<nRows ; j++)
+      for( i=0 ; i<nCols ; i++ )
+         if ( T->buf[j*nCols + i] + 1 > T->col_max[i] )
+            T->col_max[i] = T->buf[j*nCols + i]+1; // Update the maximum item of col i
 
-   T->frq_buf = (INT*) alloc_memory ( sizeof(INT) * nCol*nRow );
-   T->frq = (INT**) alloc_memory( sizeof(INT) * nCol );
+   T->frq_buf = (INT*) alloc_memory ( sizeof(INT) * nCols*nRows );
+   T->frq = (INT**) alloc_memory( sizeof(INT) * nCols );
    
    size_t cnt = 0;
-   for( i=0; i<nCol ; i++ )
+   for( i=0; i<nCols ; i++ )
    {
       // We just keep track and don't allocate for every col: (INT*)alloc_memory( sizeof(INT) * T->col_max[i] );
       T->frq[i] = &T->frq_buf[cnt]; 
       cnt += T->col_max[i];
    }
    // Fill the frequency table
-   for( j=0 ; j<nRow ; j++)
-      for( i=0 ; i<nCol ; i++ )
-         ++T->frq[i][ T->buf[j*nCol + i] ];
+   for( j=0 ; j<nRows ; j++)
+      for( i=0 ; i<nCols ; i++ )
+         ++T->frq[i][ T->buf[j*nCols + i] ];
 
 
-   T->conform      = (INT*) alloc_memory( sizeof(INT) * nRow );
-   T->seq         = (INT*) alloc_memory( sizeof(INT) * nRow );
+   T->conform      = (INT*) alloc_memory( sizeof(INT) * nRows );
+   T->seq         = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq_count   = 0;
 
 
-   g_conform = (INT*) alloc_memory( sizeof(INT) * nRow );
+   g_conform = (INT*) alloc_memory( sizeof(INT) * nRows );
 
    
    // We add number from 0 to nRow to the rows_left vector
    // These number, of course, represent the rows that have not been kicked out just yet
-   T->rows_left.reserve(nRow);
-   for( i=0 ; i<nRow ; i++ )
+   T->rows_left.reserve(nRows);
+   for( i=0 ; i<nRows ; i++ )
       T->rows_left.push_back(i);
 
    sort(T);
@@ -280,10 +287,10 @@ void TRSACT_switch(TRSACT * T)
    printf("Switching..\n");
    INT i, j, cnt = 0;
    // Fill the tmp container with values from ordered buf 
-   INT * tmp = (INT*) alloc_memory( sizeof(INT) * nRow*nCol );
-   for( i=0 ; i<nCol ; i++ )
-      for( j=0 ; j<nRow ; j++)   
-         tmp[cnt++] = T->buf[ T->seq[j]*nCol +i ]; 
+   INT * tmp = (INT*) alloc_memory( sizeof(INT) * nRows*nCols );
+   for( i=0 ; i<nCols ; i++ )
+      for( j=0 ; j<nRows ; j++)   
+         tmp[cnt++] = T->buf[ T->seq[j]*nCols +i ]; 
    
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; j++ )
@@ -293,9 +300,9 @@ void TRSACT_switch(TRSACT * T)
    TRSACT_free(T);
 
    T->buf = tmp;
-   INT k = nRow;
-   nRow = nCol;
-   nCol = k;
+   INT k = nRows;
+   nRows = nCols;
+   nCols = k;
 
 #ifdef PRINT_DEBUG
    for( j=0 ; j<nRow ; j++ )
@@ -334,24 +341,32 @@ static inline void sort(TRSACT * T)
    // We measure the time it takes to calculate all coforms and sort the rows
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
-	g_timeWhenSorted = get_time();   
-	memset( &g_conform[0], 0, sizeof(INT) * nRow );
+   g_timeWhenSorted = get_time();   
+   memset( &g_conform[0], 0, sizeof(INT) * nRows );
    // Calcualte conforms
    std::vector<INT>::iterator it;
    for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
 	{
-      for( INT i=0 ; i<nCol ; i++ )
-         g_conform[*it] += T->frq[i][ T->buf[(*it)*nCol +i] ]; 
+      for( INT i=0 ; i<nCols ; ++i )
+         g_conform[*it] += T->frq[i][ T->buf[(*it)*nCols +i] ]; 
    }
    // Sort the rows
-  // And here we sort the rows according to their conform values
-	std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
-   
+   // And here we sort the rows according to their conform values
+   bool bSorted = false;
+#ifdef _WIN32
+   if( nRows > 100000 )
+   {
+      Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
+      bSorted = true;
+   }
+#endif
+   //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
+   if( !bSorted )
+      std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
    loops_after_sort=0;
    elems_removed = 0;
-   g_break_point = 0;
    g_timeForConform=0;
    g_sort_time = get_time() - start_time;
    g_totalSortTime += (double)g_sort_time/(double)g_quadPart;
@@ -370,15 +385,15 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
     // ..loops_after_sort*nCol (which is the max possible change in conform)..
       // ..is bigger than the already found minimum confom, there can't be a lower min..
       // ..therefore we can quit the loop
-      if(g_conform[row] - loops_after_sort*nCol > min )
+      if(g_conform[row] - loops_after_sort*nCols > min )
       {
          //fprintf(debug, "%d\n", j+1);
          return j;
       }
 #endif
       // Calculate the conform for the current row..
-      for( int i=0 ; i<nCol ; i++ )
-         T->conform[row] += T->frq[i][ T->buf[(row)*nCol +i] ];
+      for( int i=0 ; i<nCols ; i++ )
+         T->conform[row] += T->frq[i][ T->buf[(row)*nCols +i] ];
 
       // If the current conform is the minimum, mark this row to be removed
       if( T->conform[row] < min )
@@ -413,7 +428,7 @@ static inline bool find_min(TRSACT * T)
    static TIMER_TYPE start_time = 0;
 
    start_time = get_time();
-   static int stat_max = nCol*nRow; // Just some big enough number
+   static int stat_max = nCols*nRows; // Just some big enough number
    min = stat_max;
    INT min_row;
    INT i;
@@ -432,19 +447,18 @@ static inline bool find_min(TRSACT * T)
    }else
    {
       //printf("g_nThreads=%d\n", g_nThreads);
-      std::vector<std::thread> threads;
+      std::vector<std::future<void>> futures;
       for(i=0; i<g_nThreads; ++i)
       {
-         threads.push_back( std::thread(calculate_conform, i, g_nThreads, size, T) );
+         //std::future<void> bgtask= std::async(std::launch::async, &calculate_conform, i, g_nThreads, size, T);
+         futures.push_back( std::async(std::launch::async, calculate_conform, i, g_nThreads, size, T) );
       }
       for(i=0; i<g_nThreads; ++i)
       {
-         threads[i].join();
+         futures[i].wait();
       }
    }
  
-   if ( (double)(get_time()-time)/(double)g_quadPart )
-   g_average_break_point += g_break_point;
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart)-g_nThreads*g_threadCreateTime;
    g_timeForTotalConform += g_timeForConform+g_nThreads*g_threadCreateTime;
    auto it_remove = T->rows_left.begin();
@@ -490,8 +504,8 @@ static inline bool find_min(TRSACT * T)
       return false; //The end
 
    // Update the frequency table
-   for( i=0 ; i<nCol ; i++ )
-      --T->frq[i][ T->buf[min_row*nCol + i] ];
+   for( i=0 ; i<nCols ; i++ )
+      --T->frq[i][ T->buf[min_row*nCols + i] ];
    
    return true;
 }
@@ -507,7 +521,7 @@ void minus(TRSACT * T)
    do
    {
 #ifdef PRINT_DEBUG   
-   for( INT i=0 ; i<nCol ; i++ )
+   for( INT i=0 ; i<nCols ; i++ )
       print_int_arr(T->frq[i], T->col_max[i], "frq");
 #endif
 
@@ -535,7 +549,7 @@ void minus(TRSACT * T)
       }
 #endif
       // We always find new conforms, and don't update the old ones using -- etc
-      memset( T->conform, 0, sizeof(INT) * nRow );
+      memset( T->conform, 0, sizeof(INT) * nRows );
    }while(1);
 
    // Iteration is faster than recursion
@@ -574,8 +588,10 @@ void global_init()
    
    for(int i = 0; i<1000; ++i)
    {
-      std::thread t( test_thread );
-      t.join();
+      std::future<void> bgtask=std::async(std::launch::async, test_thread);
+      bgtask.wait();
+      //std::thread t( test_thread );
+      //t.join();
    }
    TIMER_TYPE end_time = get_time();
    g_threadCreateTime = (double)(end_time-threadLoopStartTime) / (double) g_quadPart / 1000;
@@ -601,7 +617,7 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.dat";
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.out";
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa2.out";
 #endif
 
    TRSACT_file_load(&T, inFileName);
