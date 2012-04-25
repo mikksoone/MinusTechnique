@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <atomic>
 #include <thread>
+#include <future>
 #include <climits>
 #ifdef _WIN32
 #include <ppl.h>
@@ -506,10 +507,10 @@ static inline void sort(TRSACT * T)
    g_totalSortTime += (double)g_sort_time/(double)g_quadPart;
 }
 
-inline int calculate_conform(int j, int increment, int size, TRSACT * T)
+inline void calculate_conform(int j, int increment, int size, TRSACT * T)
 {
    if( j >= size )
-      return j;
+      return;
    for( ; j < size ; j+=increment )
    {
       auto row = T->rows_left[j];
@@ -522,7 +523,7 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
       if(g_conform[row] - elems_removed >= min )
       {
          fprintf(debug, "%d\n", j+1);
-         return j;
+         return;
       }
 #endif
       // Calculate the conform for the current row..
@@ -540,7 +541,7 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T)
          LeaveCriticalSection(&cs);
       } 
    }
-   return j;
+   return;
 }
 
 int calculateThreadCount(double oldTimeForConform, int nThread)
@@ -581,16 +582,18 @@ static inline bool find_min(TRSACT * T)
       calculate_conform( 0, 1, size, T);
    }else
    {
-      //printf("g_nThreads=%d\n", g_nThreads);
-      std::vector<std::thread> threads;
+      printf("g_nThreads=%d\n", g_nThreads);
+      std::vector<std::future<void>> futures;
       for(i=0; i<g_nThreads; ++i)
       {
-         threads.push_back( std::thread(calculate_conform, i, g_nThreads, size, T) );
+         //std::future<void> bgtask= std::async(std::launch::async, &calculate_conform, i, g_nThreads, size, T);
+         futures.push_back( std::async(std::launch::async, calculate_conform, i, g_nThreads, size, T) );
       }
       for(i=0; i<g_nThreads; ++i)
       {
-         threads[i].join();
+         futures[i].wait();
       }
+      
    }
  
    if ( (double)(get_time()-time)/(double)g_quadPart )
@@ -719,8 +722,10 @@ void global_init()
    
    for(int i = 0; i<1000; ++i)
    {
-      std::thread t( test_thread );
-      t.join();
+      std::future<void> bgtask=std::async(std::launch::async, test_thread);
+      bgtask.wait();
+      //std::thread t( test_thread );
+      //t.join();
    }
    TIMER_TYPE end_time = get_time();
    g_threadCreateTime = (double)(end_time-threadLoopStartTime) / (double) g_quadPart / 1000;
@@ -746,10 +751,10 @@ int main(int argc, char* argv[])
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
-   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
-   const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
+   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
+   //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
