@@ -70,11 +70,9 @@ namespace
    double   g_timeForConform  = 0;
    double   g_timeForTotalConform=0;
    double   g_totalSortTime    = 0;
-   double   g_timePerLine     = LLONG_MAX;
-   double   g_threadCreateTime =0;
+   double   g_timePerLine     = LONG_MAX;
    bool     g_bSort           = 0;
    bool     g_dontSkip        = 0;
-   int      g_nThreads        = 0;
    int g_average_break_point  = 0;
 #ifdef DEBUG_STATUS_TO_FILE
    FILE     *debug            = 0;
@@ -85,7 +83,6 @@ namespace
    TIMER_TYPE start_time      = 0;
    CRITICAL_SECTION cs;
    std::atomic<int> min       = 0;
-   std::vector<double> g_thread_coef;
 }
 
 static inline void sort(TRSACT * T);
@@ -271,7 +268,6 @@ void TRSACT_output_row_order(TRSACT * T, const char *fname)
 #ifdef DEBUG_TIMER   
    TIMER("output file");
 #endif
-   INT i, j, k;
    FILE *fp = fopen (fname,"w");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
@@ -289,7 +285,7 @@ void TRSACT_output_result(TRSACT * TRows, TRSACT * TCols, const char * fname)
 #ifdef DEBUG_TIMER   
    TIMER("output file");
 #endif
-   INT i, j, k;
+   INT i, k;
    FILE *fp = fopen (fname,"w");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
@@ -511,6 +507,8 @@ inline void calculate_conform(int j, int increment, int size, TRSACT * T)
 {
    if( j >= size )
       return;
+   TIMER_TYPE time = get_time();
+
    for( ; j < size ; j+=increment )
    {
       auto row = T->rows_left[j];
@@ -522,7 +520,7 @@ inline void calculate_conform(int j, int increment, int size, TRSACT * T)
       // ..therefore we can quit the loop
       if(g_conform[row] - elems_removed >= min )
       {
-         fprintf(debug, "%d\n", j+1);
+         //fprintf(debug, "%d\n", j+1);
          return;
       }
 #endif
@@ -542,16 +540,6 @@ inline void calculate_conform(int j, int increment, int size, TRSACT * T)
       } 
    }
    return;
-}
-
-int calculateThreadCount(double oldTimeForConform, int nThread)
-{
-   if( ++nThread > MAX_THREADS )
-      return MAX_THREADS;
-   double nextConformTimeGuess = g_timeForConform/g_thread_coef[nThread-2] + nThread*g_threadCreateTime;
-   if( nextConformTimeGuess < oldTimeForConform )
-      return calculateThreadCount( nextConformTimeGuess, nThread );
-   return nThread-1;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -574,31 +562,22 @@ static inline bool find_min(TRSACT * T)
    
    auto size = T->rows_left.size();
    
-   g_nThreads = calculateThreadCount(g_timeForConform, 1);
-
    TIMER_TYPE time = get_time();
-   if( g_nThreads == 1 /*|| 2+2==4*/ )
+   // calculate_conform(0,1,size, T);
+   
+   std::vector<std::future<void>> futures;
+   for(i=0; i<MAX_THREADS; ++i)
    {
-      calculate_conform( 0, 1, size, T);
-   }else
+      futures.push_back( std::async(std::launch::async, calculate_conform, i, MAX_THREADS, size, T) );
+   }
+   for(i=0; i<MAX_THREADS; ++i)
    {
-      printf("g_nThreads=%d\n", g_nThreads);
-      std::vector<std::future<void>> futures;
-      for(i=0; i<g_nThreads; ++i)
-      {
-         //std::future<void> bgtask= std::async(std::launch::async, &calculate_conform, i, g_nThreads, size, T);
-         futures.push_back( std::async(std::launch::async, calculate_conform, i, g_nThreads, size, T) );
-      }
-      for(i=0; i<g_nThreads; ++i)
-      {
-         futures[i].wait();
-      }
-      
+      futures[i].wait();
    }
  
-   if ( (double)(get_time()-time)/(double)g_quadPart )
-   g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart)-g_nThreads*g_threadCreateTime;
-   g_timeForTotalConform += g_timeForConform+g_nThreads*g_threadCreateTime;
+   g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
+   fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
+   g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
@@ -622,7 +601,7 @@ static inline bool find_min(TRSACT * T)
       g_timePerLine = timePerLine;
 
       static int cnt = 0;
-      if( ++cnt % 20  == 0 )
+      if( ++cnt % 100  == 0 )
       {
          double secondsSinceSort = (get_time() - g_timeWhenSorted ) / (double) g_quadPart;
          printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), secondsSinceSort, T->conform[min_row] );
@@ -713,25 +692,6 @@ void global_init()
   
    // For thread creations 
    InitializeCriticalSection(&cs);
-   g_thread_coef.reserve(3);
-   g_thread_coef.push_back(1.7);
-   g_thread_coef.push_back(2.42);
-   g_thread_coef.push_back(2.88);
-
-   TIMER_TYPE threadLoopStartTime = get_time();
-   
-   for(int i = 0; i<1000; ++i)
-   {
-      std::future<void> bgtask=std::async(std::launch::async, test_thread);
-      bgtask.wait();
-      //std::thread t( test_thread );
-      //t.join();
-   }
-   TIMER_TYPE end_time = get_time();
-   g_threadCreateTime = (double)(end_time-threadLoopStartTime) / (double) g_quadPart / 1000;
-   
-   printf("init_time=%4.2f, thread_create_time=%.6f\n", (double)(end_time-start_time) /(double) g_quadPart,  g_threadCreateTime);
-
 }
 
 /* main main*/
@@ -751,10 +711,10 @@ int main(int argc, char* argv[])
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess.dat"; argc = 3;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\chess2.out";
-   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
-   //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
+   const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
