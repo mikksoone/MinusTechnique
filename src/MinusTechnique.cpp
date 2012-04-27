@@ -30,7 +30,7 @@
 // Verbal version for debugging
 // #define PRINT_DEBUG
 #define PRINT_STATUS
-#define DEBUG_STATUS_TO_FILE
+//#define DEBUG_STATUS_TO_FILE
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 #define MAX_THREADS 4
@@ -62,7 +62,7 @@ namespace
    // General data
    int      FILE_err          = 0;
    int      loops_after_sort  = 0;
-   int      elems_removed     = 0;
+   std::atomic<int>      elems_removed     = 0;
    int      nRows             = 0;
    int      nCols             = 0;
    INT      *g_conform        = 0;
@@ -81,8 +81,6 @@ namespace
    TIMER_TYPE g_sort_time     = 0;
    TIMER_TYPE g_timeWhenSorted= 0;
    TIMER_TYPE start_time      = 0;
-   CRITICAL_SECTION cs;
-   std::atomic<int> min       = 0;
 }
 
 static inline void sort(TRSACT * T);
@@ -250,6 +248,7 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
 
 void print_table_data(TRSACT * T)
 {
+#ifdef DEBUG_STATUS_TO_FILE
    for( int j = 0, k = 0; j < nRows; ++j )
    {
       k=j; //T->seq[j];
@@ -260,6 +259,7 @@ void print_table_data(TRSACT * T)
    }
    //fprintf(debug, "%d\t%d\t%4.2f\n", T->rows_left.size(), tmp, total_seconds );
    fflush(debug);
+#endif
 }
 
 // Prints the reordered table to a file 
@@ -495,51 +495,53 @@ static inline void sort(TRSACT * T)
       std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
-   loops_after_sort=0;
    elems_removed = 0;
    g_dontSkip=0;
    g_timeForConform=0;
    g_sort_time = get_time() - start_time;
    g_totalSortTime += (double)g_sort_time/(double)g_quadPart;
+/*	static int cnt = 0;
+   if( ++cnt % 10  == 0 )
+      printf("sort_time=%4.2f, loops_before_sort=%d\n", (double)g_sort_time/(double)g_quadPart, loops_after_sort );
+*/
+      loops_after_sort=0;
 }
 
-inline void calculate_conform(int j, int increment, int size, TRSACT * T)
+inline int calculate_conform(int j, int increment, int size, TRSACT * T, int min)
 {
    if( j >= size )
-      return;
-   TIMER_TYPE time = get_time();
+      return min;
 
    for( ; j < size ; j+=increment )
    {
       auto row = T->rows_left[j];
+
 #ifdef SORT
       // Here is the part that makes this implementation quick:
       // If the conform at time of the latest sort minus..
-    // ..loops_after_sort*nCol (which is the max possible change in conform)..
+      // ..loops_after_sort*nCol (which is the max possible change in conform)..
       // ..is bigger than the already found minimum confom, there can't be a lower min..
       // ..therefore we can quit the loop
       if(g_conform[row] - elems_removed >= min )
       {
          //fprintf(debug, "%d\n", j+1);
-         return;
+         return min;
       }
+
 #endif
       // Calculate the conform for the current row..
       for( int i=0 ; i<T->elem_count[row] ; ++i )
          T->conform[row] += T->frq[ T->elem[(row)][i] ];
 
       // If the current conform is the minimum, mark this row to be removed
+      
       if( T->conform[row] < min )
       {
-         EnterCriticalSection(&cs);
-         if( T->conform[row] < min )
-         {
-            min = T->conform[row]; 
-         }
-         LeaveCriticalSection(&cs);
-      } 
+         min = T->conform[row]; 
+      }
+
    }
-   return;
+   return min;
 }
 
 /* Routine for finding the row with minimum conform */
@@ -548,13 +550,11 @@ static inline bool find_min(TRSACT * T)
 #ifdef DEBUG_TIMER   
    TIMER("find_min");
 #endif
-   static TIMER_TYPE start_time = 0;
-   start_time = get_time();
    INT min_row;
    INT i;
    INT loops_to_do = 0;
    static int stat_max = LONG_MAX; // Just some big enough number
-   min = stat_max;
+   int min = stat_max;
 
 #ifdef PRINT_DEBUG
    print_int_arr(g_conform, nNodes, "g_conform");
@@ -563,20 +563,29 @@ static inline bool find_min(TRSACT * T)
    auto size = T->rows_left.size();
    
    TIMER_TYPE time = get_time();
+
    // calculate_conform(0,1,size, T);
-   
-   std::vector<std::future<void>> futures;
+   std::vector<std::future<int>> futures;
    for(i=0; i<MAX_THREADS; ++i)
    {
-      futures.push_back( std::async(std::launch::async, calculate_conform, i, MAX_THREADS, size, T) );
+      futures.push_back( std::async(std::launch::async, calculate_conform, i, MAX_THREADS, size, T, min) );
    }
+   //Wait for the threads to complete
    for(i=0; i<MAX_THREADS; ++i)
    {
       futures[i].wait();
    }
- 
+   //Get the results
+   for(i=0; i<MAX_THREADS; ++i)
+   {
+      int tmp = futures[i].get();
+      min = min < tmp ? min : tmp; 
+   }
+
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
+#ifdef DEBUG_STATUS_TO_FILE
    fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
+#endif
    g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
    auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
@@ -591,7 +600,7 @@ static inline bool find_min(TRSACT * T)
    printf( "row=%d conform=%d\n", min_row, T->conform[min_row] );
    print_int_arr(&T->elem_buf[T->elem[min_row][0]], T->elem_count[min_row], "eliminated row");
 #endif
-   if( ++loops_after_sort % 5 == 0 )
+   if( ++loops_after_sort % 10 == 0 )
    {
      TIMER_TYPE timeSinceSort = get_time() - g_timeWhenSorted;
       double timePerLine =  (get_time() - g_timeWhenSorted ) / (double) (loops_after_sort);
@@ -603,10 +612,11 @@ static inline bool find_min(TRSACT * T)
       static int cnt = 0;
       if( ++cnt % 100  == 0 )
       {
-         double secondsSinceSort = (get_time() - g_timeWhenSorted ) / (double) g_quadPart;
-         printf( "rows_left=%d seconds=%4.2f conform=%d\n",T->rows_left.size(), secondsSinceSort, T->conform[min_row] );
+         double total_time = (get_time() - start_time ) / (double) g_quadPart;
+         printf( "rows_left=%d seconds=%4.2f conform=%d, sort_time=%4.2f\n",T->rows_left.size(), total_time, T->conform[min_row], (double)g_sort_time/(double)g_quadPart );
       }
    }
+
    // Remove the min row from the vector of rows left      
    T->rows_left.erase( it_remove );
    // Remember the row kicked out
@@ -648,17 +658,10 @@ void minus(TRSACT * T)
 #ifdef PRINT_DEBUG
          printf("sort/find: %4.2f, threshold=%d\n", double(g_sort_time)/double(g_find_time), SORT_THRESHOLD);
 #endif
-		   TIMER_TYPE total_time = get_time() - start_time;
-		   double total_seconds = 0;
-		   // For getting the time in human-readable form (seconds)
-#ifdef _WIN32
-         total_seconds = (double)total_time/(double)g_quadPart;
-#endif
 #ifdef DEBUG_STATUS_TO_FILE
 		   fprintf(debug, "%d\t%d\t%4.2f\n", T->rows_left.size(), tmp, total_seconds );
          fflush(debug);
 #endif
-		   printf("rows_left=%d\t%d\tsort_time=%4.2f\t%4.2f\n", T->rows_left.size(),tmp, (double)g_sort_time/(double)g_quadPart, total_seconds);
       }
 #endif
       // We always find new conforms, and don't update the old ones using -- etc
@@ -690,8 +693,6 @@ void global_init()
 	fflush(debug);
 #endif
   
-   // For thread creations 
-   InitializeCriticalSection(&cs);
 }
 
 /* main main*/
@@ -709,12 +710,12 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
-   const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
-   const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
+   //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
+   //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -728,7 +729,6 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&TRows);
 
-   InitializeCriticalSection(&cs);
    minus(&TRows);
    // print_table_data(&TRows);   
    /*/ For debugging only columns
