@@ -74,6 +74,7 @@ namespace
    bool     g_bSort           = 0;
    bool     g_dontSkip        = 0;
    int g_average_break_point  = 0;
+   int g_last_elems_removed   = 0;
 #ifdef DEBUG_STATUS_TO_FILE
    FILE     *debug            = 0;
 #endif
@@ -474,17 +475,23 @@ static inline void sort(TRSACT * T)
    g_timeWhenSorted = get_time();
    memset( &g_conform[0], 0, sizeof(INT) * nRows );
    // Calcualte conforms
-   std::vector<INT>::iterator it;
-   for( it = T->rows_left.begin() ; it != T->rows_left.end() ; ++it )
+
+   Concurrency::parallel_for_each(T->rows_left.begin(), T->rows_left.end(), [&](int row)
    {
-      for( int i=0 ; i<T->elem_count[*it] ; ++i )
-         g_conform[*it] += T->frq[ T->elem[*it][i] ];
-   }
+      if( T->conform[row] )
+      {
+         g_conform[row] = T->conform[row];
+      }else
+      {
+         for( int i=0 ; i<T->elem_count[row] ; ++i )
+            g_conform[row] += T->frq[ T->elem[row][i] ];
+      }
+   });
 
    // And here we sort the rows according to their conform values
    bool bSorted = false;
 #ifdef _WIN32
-   if( nRows > 100000 )
+   if( nRows )
    {
       Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
       bSorted = true;
@@ -495,7 +502,7 @@ static inline void sort(TRSACT * T)
       std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
-   elems_removed = 0;
+   elems_removed = g_last_elems_removed;
    g_dontSkip=0;
    g_timeForConform=0;
    g_sort_time = get_time() - start_time;
@@ -511,7 +518,7 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T, int min
 {
    if( j >= size )
       return min;
-
+   int delta_check = j+increment*10;
    for( ; j < size ; j+=increment )
    {
       auto row = T->rows_left[j];
@@ -522,10 +529,16 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T, int min
       // ..loops_after_sort*nCol (which is the max possible change in conform)..
       // ..is bigger than the already found minimum confom, there can't be a lower min..
       // ..therefore we can quit the loop
-      if(g_conform[row] - elems_removed >= min )
+      if( j % delta_check == 0 )
       {
-         //fprintf(debug, "%d\n", j+1);
-         return min;
+         if(g_conform[row] - elems_removed >= min )
+         {
+            //fprintf(debug, "%d\n", j+1);
+            return min;
+         }/*else
+         {
+            delta_check*=2;
+         }*/
       }
 
 #endif
@@ -626,7 +639,7 @@ static inline bool find_min(TRSACT * T)
       return false; //The end
 
    elems_removed += T->elem_count[min_row];
-
+   g_last_elems_removed = T->elem_count[min_row];
    // Update the frequency table
    for( i=0 ; i<T->elem_count[min_row] ; ++i )
       --T->frq[ T->elem[min_row][i] ];
@@ -710,10 +723,10 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
    //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
 #endif
