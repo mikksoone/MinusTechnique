@@ -34,7 +34,7 @@
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 #define MAX_THREADS 4
-//#define HARDCODED_DATA // If we don't want to specify input/output files 
+#define HARDCODED_DATA // If we don't want to specify input/output files 
 
 // The timers in windows and linux are different
 #ifdef _WIN32
@@ -726,10 +726,12 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.dat"; argc = 4;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0302.out"; 
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
    //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_lcm.dat"; argc = 3;
@@ -740,12 +742,13 @@ int main(int argc, char* argv[])
 	fflush(debug);
 #endif
    TRSACT TRows;
+
+   printf("\nStarting: %s\n", inFileName);
+
    if ( argc == 3 )
       TRSACT_file_load(&TRows, inFileName);
    else
       TRSACT_file_load_graph(&TRows, inFileName);
-
-   printf("\nStarting: %s\n", inFileName);
 
    TRSACT_init(&TRows);
 
