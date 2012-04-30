@@ -34,7 +34,7 @@
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 #define MAX_THREADS 4
-#define HARDCODED_DATA // If we don't want to specify input/output files 
+//#define HARDCODED_DATA // If we don't want to specify input/output files 
 
 // The timers in windows and linux are different
 #ifdef _WIN32
@@ -423,7 +423,7 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
             }
          }
       }
-      if ( ! (k % 100) )printf("%d ", k); 
+      //if ( ! (k % 10000) )printf("%d ", k); 
    }
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; ++j )
@@ -490,16 +490,19 @@ static inline void sort(TRSACT * T)
 
    // And here we sort the rows according to their conform values
    bool bSorted = false;
+   //start_time = get_time();
 #ifdef _WIN32
-   if( nRows )
+   static int first_time = true;
+   if( true || first_time )
    {
       Concurrency::parallel_sort(T->rows_left.begin(), T->rows_left.end(), SortFunc() );
       bSorted = true;
+      first_time = false;
    }
 #endif
    //std::qsort(&T->rows_left[0], T->rows_left.size(), sizeof(INT), qsort_cmp_conform);
    if( !bSorted )
-      std::sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
+      std::_Insertion_sort( T->rows_left.begin(), T->rows_left.end(), psort_cmp_conform );
    g_bSort = false;
    g_timePerLine = LLONG_MAX;
    elems_removed = g_last_elems_removed;
@@ -507,10 +510,10 @@ static inline void sort(TRSACT * T)
    g_timeForConform=0;
    g_sort_time = get_time() - start_time;
    g_totalSortTime += (double)g_sort_time/(double)g_quadPart;
-/*	static int cnt = 0;
-   if( ++cnt % 10  == 0 )
-      printf("sort_time=%4.2f, loops_before_sort=%d\n", (double)g_sort_time/(double)g_quadPart, loops_after_sort );
-*/
+	static int cnt = 0;
+   //if( ++cnt % 10  == 0 )
+//      printf("sort_time=%.8f, loops_before_sort=%d\n", (double)g_sort_time/(double)g_quadPart, loops_after_sort );
+
       loops_after_sort=0;
 }
 
@@ -623,7 +626,7 @@ static inline bool find_min(TRSACT * T)
       g_timePerLine = timePerLine;
 
       static int cnt = 0;
-      if( ++cnt % 100  == 0 )
+      if( ++cnt % 1000  == 0 )
       {
          double total_time = (get_time() - start_time ) / (double) g_quadPart;
          printf( "rows_left=%d seconds=%4.2f conform=%d, sort_time=%4.2f\n",T->rows_left.size(), total_time, T->conform[min_row], (double)g_sort_time/(double)g_quadPart );
@@ -729,6 +732,8 @@ int main(int argc, char* argv[])
    const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
    //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_lcm.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_monsa.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -739,6 +744,8 @@ int main(int argc, char* argv[])
       TRSACT_file_load(&TRows, inFileName);
    else
       TRSACT_file_load_graph(&TRows, inFileName);
+
+   printf("\nStarting: %s\n", inFileName);
 
    TRSACT_init(&TRows);
 
@@ -776,7 +783,8 @@ int main(int argc, char* argv[])
 #else
    total_seconds = total_time/1000.0;
 #endif
-   printf("Finished in about %4.2f seconds, konform=%4.2f, sort=%4.2f\n", total_seconds, g_timeForTotalConform, g_totalSortTime );
+   printf("\n%s\t%6.4f\t%6.4f\t%6.4f\n",inFileName,total_seconds, g_timeForTotalConform, g_totalSortTime);
+   //printf("Finished in about %4.2f seconds, konform=%4.2f, sort=%4.2f\n", total_seconds, g_timeForTotalConform, g_totalSortTime );
 #ifdef DEBUG_TIMER
    TimerContainer::dump("minus_timer.txt");
 #endif
