@@ -34,7 +34,7 @@
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
 #define MAX_THREADS 4
-#define HARDCODED_DATA // If we don't want to specify input/output files 
+//#define HARDCODED_DATA // If we don't want to specify input/output files 
 
 // The timers in windows and linux are different
 #ifdef _WIN32
@@ -475,8 +475,11 @@ static inline void sort(TRSACT * T)
    g_timeWhenSorted = get_time();
    memset( &g_conform[0], 0, sizeof(INT) * nRows );
    // Calcualte conforms
-
+#ifdef MAX_THREADS
    Concurrency::parallel_for_each(T->rows_left.begin(), T->rows_left.end(), [&](int row)
+#else
+   std::_For_each(T->rows_left.begin(), T->rows_left.end(), [&](int row)
+#endif
    {
       if( T->conform[row] )
       {
@@ -579,8 +582,13 @@ static inline bool find_min(TRSACT * T)
    auto size = T->rows_left.size();
    
    TIMER_TYPE time = get_time();
+   auto it_remove = T->rows_left.begin();
 
-   // calculate_conform(0,1,size, T);
+#ifdef SORT 
+#ifndef MAX_THREADS
+   min = calculate_conform(0,1,size, T, min);
+#else
+   
    std::vector<std::future<int>> futures;
    for(i=0; i<MAX_THREADS; ++i)
    {
@@ -597,18 +605,34 @@ static inline bool find_min(TRSACT * T)
       int tmp = futures[i].get();
       min = min < tmp ? min : tmp; 
    }
-
-   g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
+   
+#endif
 #ifdef DEBUG_STATUS_TO_FILE
    fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
 #endif
-   g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
-   auto it_remove = T->rows_left.begin();
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
       if ( T->conform[*it_remove]==min ) break;
    }
-   
+#else
+   Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
+   {
+      // Calculate the conform for the current row..
+      for( int i=0 ; i<T->elem_count[value] ; i++ )
+         T->conform[value] += T->frq[ T->elem[(value)][i] ];
+   });
+
+   auto last = T->rows_left.end();
+   auto first = T->rows_left.begin();
+
+   while (++first!=last)
+      if( T->conform[*first] <  T->conform[*it_remove] )
+         it_remove=first;
+
+#endif
+   g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
+   g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
+
    min_row = *it_remove;
    // printf(" m=%d ", min_row);
 #ifdef PRINT_DEBUG
@@ -647,6 +671,7 @@ static inline bool find_min(TRSACT * T)
    for( i=0 ; i<T->elem_count[min_row] ; ++i )
       --T->frq[ T->elem[min_row][i] ];
    
+   fflush (stdout);
    return true;
 }
 
@@ -726,10 +751,10 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.dat"; argc = 3;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
