@@ -406,6 +406,7 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T, int min
    return min;
 }
 
+inline 
 /* Routine for finding the row with minimum conform */
 static inline bool find_min(TRSACT * T)
 {
@@ -424,11 +425,10 @@ static inline bool find_min(TRSACT * T)
    TIMER_TYPE time = get_time();
    auto it_remove = T->rows_left.begin();
 
-#ifdef SORT 
 #ifndef MAX_THREADS
    min = calculate_conform(0,1,size, T, min);
 #else
-   
+#ifdef SORT   
    std::vector<std::future<int>> futures;
    for(i=0; i<MAX_THREADS; ++i)
    {
@@ -445,21 +445,12 @@ static inline bool find_min(TRSACT * T)
       int tmp = futures[i].get();
       min = min < tmp ? min : tmp; 
    }
-   
-#endif 
-#ifdef DEBUG_STATUS_TO_FILE
-   fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
-#endif
-   for ( ;it_remove!=T->rows_left.end() ; it_remove++)
-   {
-      if ( T->conform[*it_remove]==min ) break;
-   }
 #else
-   Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
+   Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int row)
    {
       // Calculate the conform for the current row..
-      for( int i=0 ; i<T->elem_count[value] ; i++ )
-         T->conform[value] += T->frq[ T->elem[(value)][i] ];
+      for( int i=0 ; i<nCols ; i++ )
+         T->conform[row] += T->frq[i][ T->buf[(row)*nCols +i] ];
    });
 
    auto last = T->rows_left.end();
@@ -468,7 +459,19 @@ static inline bool find_min(TRSACT * T)
    while (++first!=last)
       if( T->conform[*first] <  T->conform[*it_remove] )
          it_remove=first;
- #endif
+#endif
+#endif
+
+#ifdef DEBUG_STATUS_TO_FILE
+   fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
+#endif
+
+#ifndef MAX_THREADS
+   for ( ;it_remove!=T->rows_left.end() ; it_remove++)
+   {
+      if ( T->conform[*it_remove]==min ) break;
+   }
+#endif
 
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
    g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
