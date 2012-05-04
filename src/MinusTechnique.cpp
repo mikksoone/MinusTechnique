@@ -27,7 +27,6 @@
 //#define DEBUG_STATUS_TO_FILE
 
 #define SORT          // Could be undef if one want's to compare time differences
-#define MIN_ITEM 0    // If lowest item is 1, lower every item by 1
 #define INT int       // Maybe a double is needed?
 #define MAX_THREADS 4
 //#define HARDCODED_DATA // If we don't want to specify input/output files 
@@ -177,7 +176,7 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
          item = FILE_read_int (fp);
          if ( (FILE_err&4) == 0)
          {  // got an item from the file before reaching to line-end
-            T->buf[j*nCols+i] = item-MIN_ITEM; //to get the elements started from 0
+            T->buf[j*nCols+i] = item;
             i++;
          }
       } while ((FILE_err&3)==0);
@@ -202,7 +201,7 @@ void TRSACT_output_result(TRSACT * T, const char *fname)
    {
       for( j=0 ; j<nRows ; j++) 
       {
-         fprintf( fp, "%d ", T->buf[ T->seq[j]*nCols+i ] + MIN_ITEM );
+         fprintf( fp, "%d ", T->buf[ T->seq[j]*nCols+i ] );
       }
       fprintf(fp, "\n");
    }
@@ -236,9 +235,11 @@ void TRSACT_init( TRSACT * T )
    T->col_max = (INT*) alloc_memory( sizeof( INT ) * nCols );
 
    for( j=0 ; j<nRows ; j++)
+   {
       for( i=0 ; i<nCols ; i++ )
          if ( T->buf[j*nCols + i] + 1 > T->col_max[i] )
             T->col_max[i] = T->buf[j*nCols + i]+1; // Update the maximum item of col i
+   }
 
    T->frq_buf = (INT*) alloc_memory ( sizeof(INT) * nCols*nRows );
    T->frq = (INT**) alloc_memory( sizeof(INT) * nCols );
@@ -594,8 +595,8 @@ int main(int argc, char* argv[])
    const char * inFileName = argv[1];
    const char * outFileName = argv[2];
 #else
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.dat";
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa_2.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\male8000.txt";
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\male8000_2.out";
 #endif
    printf("\nStarting: %s\n", inFileName);
    TRSACT_file_load(&T, inFileName);
