@@ -187,7 +187,7 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
 }
 
 /* Prints the reordered table to a file */
-void TRSACT_output_result(TRSACT * T, const char *fname)
+void TRSACT_output_result(TRSACT * T, const char *fname, int * seq)
 {
 #ifdef DEBUG_TIMER   
    TIMER("output file");
@@ -205,6 +205,22 @@ void TRSACT_output_result(TRSACT * T, const char *fname)
       }
       fprintf(fp, "\n");
    }
+
+   fprintf(fp, "\nRow order: \n");
+
+   for( i=0 ; i<nCols ; i++ )
+   {
+      fprintf( fp, "%d ", seq[i] );
+   }
+
+   fprintf(fp, "\nCol order: \n");
+   
+   for( j=0 ; j<nRows ; j++) 
+   {
+       fprintf( fp, "%d ", T->seq[j] );
+   }
+   fprintf(fp, "\n");
+
    fclose(fp);
 }
 
@@ -595,8 +611,8 @@ int main(int argc, char* argv[])
    const char * inFileName = argv[1];
    const char * outFileName = argv[2];
 #else
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\male8000.txt";
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\male8000_2.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.dat";
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect_monsa.out";
 #endif
    printf("\nStarting: %s\n", inFileName);
    TRSACT_file_load(&T, inFileName);
@@ -607,11 +623,16 @@ int main(int argc, char* argv[])
 
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
+
+   int * seq = (int*) alloc_memory( sizeof(INT) * nRows );
+   memcpy(seq, &T.seq[0], sizeof(INT) * nRows); 
+
    TRSACT_switch(&T);
 
    minus(&T);
 
-   TRSACT_output_result(&T, outFileName);
+   TRSACT_output_result(&T, outFileName, seq);
+   free(seq);
 
    TRSACT_free(&T);
 
