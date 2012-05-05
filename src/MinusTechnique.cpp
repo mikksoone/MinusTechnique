@@ -779,11 +779,11 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&TRows);
 
-   //minus(&TRows);
+   minus(&TRows);
    // print_table_data(&TRows);   
    // For debugging only columns
-    for(int i = 0; i<nRows; ++i)
-      TRows.seq[i] = i;
+   // for(int i = 0; i<nRows; ++i)
+   //   TRows.seq[i] = i;
    
    // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
