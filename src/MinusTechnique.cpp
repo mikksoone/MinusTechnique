@@ -138,6 +138,21 @@ public:
       return (g_conform[left] < g_conform[right]);
    }
 };
+
+/* Multiplatform function for getting the time in one big number */
+static inline TIMER_TYPE get_time()
+{
+#ifdef _WIN32
+   static LARGE_INTEGER li;
+   QueryPerformanceCounter(&li);
+   return li.QuadPart;
+#else
+   static timeval t;
+   gettimeofday(&t, NULL);
+   return (t.tv_sec * 1000.0) + t.tv_usec/1000.0;
+#endif
+}
+
 /* read an integer from the file (Takeaki Uno)*/
 INT FILE_read_int (FILE *fp){
   INT item;
@@ -381,6 +396,7 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
    TIMER("switch");
 #endif
    printf("Switching..\n");
+   TIMER_TYPE start = get_time();
    INT i(0), j(0), k(0), cnt(0);
 
    // Fill the tmp container with values from ordered buf 
@@ -417,7 +433,7 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
             {
                cols->elem_buf[cnt++] = i+1;
                ++cols->elem_count[k-1];
-            } else if ( k > T->elem[i][j] )
+            } else if ( T->elem[i][j] > k )
             {
                break;
             }
@@ -442,23 +458,9 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
 
    // Init again..
    TRSACT_init(cols);
-   printf("Switching done\n");
+   printf("Switching done: %.4f\n", (get_time()-start) / (double) g_quadPart);
 }
 
-
-/* Multiplatform function for getting the time in one big number */
-static inline TIMER_TYPE get_time()
-{
-#ifdef _WIN32
-   static LARGE_INTEGER li;
-   QueryPerformanceCounter(&li);
-   return li.QuadPart;
-#else
-   static timeval t;
-   gettimeofday(&t, NULL);
-   return (t.tv_sec * 1000.0) + t.tv_usec/1000.0;
-#endif
-}
 
 /* Function for calculating fresh global conforms and then sorting the rows
    according to the just calculated conforms. 
@@ -751,16 +753,16 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.dat"; argc = 3;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
    //const char * outFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt.out";
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_lcm.dat"; argc = 3;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_monsa.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_binary.dat"; argc = 3;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\4ta2_binary.out";
 #endif
 #ifdef DEBUG_STATUS_TO_FILE
 	fprintf(debug, "start..\n");
@@ -777,11 +779,11 @@ int main(int argc, char* argv[])
 
    TRSACT_init(&TRows);
 
-   minus(&TRows);
+   //minus(&TRows);
    // print_table_data(&TRows);   
-   /*/ For debugging only columns
+   // For debugging only columns
     for(int i = 0; i<nRows; ++i)
-      TRows.seq[i] = i; */
+      TRows.seq[i] = i;
    
    // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
