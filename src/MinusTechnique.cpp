@@ -33,7 +33,8 @@
 //#define DEBUG_STATUS_TO_FILE
 #define SORT          // Could be undef if one want's to compare time differences
 #define INT int       // Maybe a double is needed?
-#define MAX_THREADS 4
+#define THREADED
+int g_nThreads = 4;
 //#define HARDCODED_DATA // If we don't want to specify input/output files 
 
 // The timers in windows and linux are different
@@ -52,6 +53,7 @@ typedef struct {
    INT *frq;
    INT *conform;
    INT *seq; //sequence of rows eliminated
+   INT *seq_row;
    INT seq_count;
    std::vector<INT> rows_left;
 } TRSACT;
@@ -228,21 +230,49 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
    FILE *fp = fopen (fname,"r");
 
    if ( !fp ){ printf ("file open error\n"); exit (1); }
-
+   /*
    nRows = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 1\n"); exit (1); }
    int nElems = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
    T->elem_buf_size = FILE_read_int (fp);
    if ( (FILE_err&4) != 0){ printf ("file structure error 2\n"); exit (1); }
+   */
+   INT row = 0;
+   INT max = 0;
+   INT item = 0;
+   INT count = 0;
+   do 
+   {
+      do 
+      {
+         item = FILE_read_int (fp);
+         if ( (FILE_err&4) == 0)
+         {  // got an item from the file before reaching to line-end
+            if ( item > max ) max = item;
+            count++;
+         }
+      } while ((FILE_err&3)==0);
+      ++row;
+   } while ( (FILE_err&2)==0);
 
+
+   printf("max item=%d, elems=%d, rows=%d\n", max, count, row);
+   T->elem_buf_size = count+row;
+   nCols = max+1;
+   nRows = row;
    T->elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
    T->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
    T->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
    
-   INT item=0;
+   //INT * col_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
+   //INT ** colelem = (INT **)alloc_memory( sizeof(INT) * nCols );
+   //colelem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
+   //INT colelems = 0;
+   fseek(fp, 0, SEEK_SET);
+   item=0;
    INT i = 0; // counter
-   INT row = 0; // row id
+   row = 0; // row id
    INT elem = 0; // elem id
    do 
    {
@@ -254,12 +284,18 @@ void TRSACT_file_load (TRSACT *T, const char *fname)
          {  // got an item from the file before reaching to line-end
             T->elem_buf[i++] = item;
             ++T->elem_count[row];
+            //++colelem_count[item];
          }
       } while ((FILE_err&3)==0);
       ++row;
    } while ( (FILE_err&2)==0);
-   nCols = nElems;
+//   nCols = nElems;
    fclose(fp);
+
+   for(i=0; i<nRows; ++i)
+   {
+
+   }
 }
 
 void print_table_data(TRSACT * T)
@@ -309,8 +345,8 @@ void TRSACT_output_result(TRSACT * TRows, TRSACT * TCols, const char * fname)
    {
       int row = TRows->seq[k];
       // We need to sort the rows according to the 
-      std::sort( TRows->elem[row], TRows->elem[row]+TRows->elem_count[ TRows->seq[row] ],
-         [TCols](int a, int b){ return TCols->seq[a] < TCols->seq[b]; });
+      std::sort( TRows->elem[row], TRows->elem[row]+TRows->elem_count[ row ],
+         [TCols](int a, int b){ return TCols->seq_row[a] < TCols->seq_row[b]; });
       for( i=0 ; i<TRows->elem_count[row] ; ++i )
       {
          fprintf( fp, "%d ", TRows->elem[row][i] );
@@ -320,10 +356,13 @@ void TRSACT_output_result(TRSACT * TRows, TRSACT * TCols, const char * fname)
    // Also print the order of cols and rows
    fprintf(fp, "\nColumn order:\n");
    for( i=0; i<nRows; ++i)
-      fprintf( fp, "%d ", TCols->seq[i] );
+   {
+      if( TCols->elem_count[TCols->seq[i]] )
+         fprintf( fp, "%d ", TCols->seq[i]+1 );
+   }
    fprintf(fp, "\nRow order:\n");
    for( i=0; i<nCols; ++i)
-      fprintf( fp, "%d ", TRows->seq[i] );
+      fprintf( fp, "%d ", TRows->seq[i]+1 );
    fprintf(fp, "\n");
    fclose(fp);
 }
@@ -340,6 +379,7 @@ void TRSACT_free( TRSACT * T )
 
    free( T->conform );
    free( T->seq );
+   free( T->seq_row );
    free( T->frq );
 }
 
@@ -367,6 +407,7 @@ void TRSACT_init( TRSACT * T )
 
    T->conform      = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq         = (INT*) alloc_memory( sizeof(INT) * nRows );
+   T->seq_row         = (INT*) alloc_memory( sizeof(INT) * nRows );
    T->seq_count   = 0;
 
    
@@ -401,9 +442,36 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
 
    // Fill the tmp container with values from ordered buf 
    cols->elem_buf = (INT *)alloc_memory ( sizeof(INT) * T->elem_buf_size );
-   cols->elem = (INT **)alloc_memory( sizeof(INT) * nRows );
-   cols->elem_count = (INT *)alloc_memory( sizeof(INT) * nRows );
+   cols->elem = (INT **)alloc_memory( sizeof(INT) * (nCols+1) );
+   cols->elem_count = (INT *)alloc_memory( sizeof(INT) * (nCols+1) );
 
+   for( i=0 ; i<nRows ; ++i )
+   {
+      for( j=0; j<T->elem_count[ i ]; ++j)
+      {
+         ++cols->elem_count[ T->elem[i][j] ];
+      }
+   }
+
+   cnt = 0;
+   for( j=0; j<=nCols; ++j)
+   {
+      cols->elem[j] = &cols->elem_buf[ cnt + cols->elem_count[j] ];
+      cnt += cols->elem_count[j];
+   }
+
+   INT * cur_elem_count = (INT *)alloc_memory( sizeof(INT) * (nCols+1) );
+   for( i=0 ; i<nRows ; ++i )
+   {
+      for( j=0; j<T->elem_count[ i ]; ++j)
+      {
+         int item = T->elem[i][j];
+         cols->elem[item][ cur_elem_count[item]++ ] = i;
+      }
+   }
+
+   free( cur_elem_count );
+   
    /* // Switching using set/hash_set...both are slow
    typedef std::set<int> map; 
    std::vector < map > row_col_vec;
@@ -418,8 +486,11 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
       row_col_vec.push_back( row_col_map );
    }
    */
+   /*
    for( k = 1; k <= nCols ; ++k )
    {
+      if( !colelem_count[k] )
+         continue;
       cols->elem[k-1] =  &cols->elem_buf[cnt];
       for( i=0 ; i<nRows ; ++i )
       {
@@ -441,6 +512,7 @@ void TRSACT_switch(TRSACT * T, TRSACT * cols)
       }
       //if ( ! (k % 10000) )printf("%d ", k); 
    }
+   */
 #ifdef PRINT_DEBUG
    for( j=0; j<nRow ; ++j )
       print_int_arr(&T->buf[T->seq[j]*nCol], nCol, "buf ordered");
@@ -470,14 +542,16 @@ static inline void sort(TRSACT * T)
 {
 #ifdef DEBUG_TIMER   
    TIMER("sort");
-#endif 
+#endif
+   if( T->rows_left.size() < 2 )
+      return;
    // We measure the time it takes to calculate all coforms and sort the rows
    static TIMER_TYPE start_time = 0;
    start_time = get_time();
    g_timeWhenSorted = get_time();
    memset( &g_conform[0], 0, sizeof(INT) * nRows );
    // Calcualte conforms
-#ifdef MAX_THREADS
+#ifdef THREADED
    Concurrency::parallel_for_each(T->rows_left.begin(), T->rows_left.end(), [&](int row)
 #else
    std::_For_each(T->rows_left.begin(), T->rows_left.end(), [&](int row)
@@ -582,41 +656,45 @@ static inline bool find_min(TRSACT * T)
 #endif
    
    auto size = T->rows_left.size();
-   
+
    TIMER_TYPE time = get_time();
+
    auto it_remove = T->rows_left.begin();
 
-#ifdef SORT 
-#ifndef MAX_THREADS
+#ifndef THREADED
    min = calculate_conform(0,1,size, T, min);
 #else
-   
+#ifdef SORT 
    std::vector<std::future<int>> futures;
-   for(i=0; i<MAX_THREADS; ++i)
+   for(i=0; i<g_nThreads; ++i)
    {
-      futures.push_back( std::async(std::launch::async, calculate_conform, i, MAX_THREADS, size, T, min) );
+      futures.push_back( std::async(std::launch::async, calculate_conform, i, g_nThreads, size, T, min) );
    }
    //Wait for the threads to complete
-   for(i=0; i<MAX_THREADS; ++i)
+   for(i=0; i<g_nThreads; ++i)
    {
       futures[i].wait();
    }
    //Get the results
-   for(i=0; i<MAX_THREADS; ++i)
+   for(i=0; i<g_nThreads; ++i)
    {
       int tmp = futures[i].get();
       min = min < tmp ? min : tmp; 
    }
-   
 #endif
+#endif
+
 #ifdef DEBUG_STATUS_TO_FILE
    fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
 #endif
+#if !defined(THREADED) || defined(SORT)
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
       if ( T->conform[*it_remove]==min ) break;
    }
-#else
+#endif
+
+#if !defined(SORT) && defined(THREADED)
    Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
    {
       // Calculate the conform for the current row..
@@ -630,8 +708,8 @@ static inline bool find_min(TRSACT * T)
    while (++first!=last)
       if( T->conform[*first] <  T->conform[*it_remove] )
          it_remove=first;
-
 #endif
+
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
    g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
 
@@ -642,6 +720,7 @@ static inline bool find_min(TRSACT * T)
    printf( "row=%d conform=%d\n", min_row, T->conform[min_row] );
    print_int_arr(&T->elem_buf[T->elem[min_row][0]], T->elem_count[min_row], "eliminated row");
 #endif
+
    if( ++loops_after_sort % 10 == 0 )
    {
      TIMER_TYPE timeSinceSort = get_time() - g_timeWhenSorted;
@@ -662,18 +741,25 @@ static inline bool find_min(TRSACT * T)
    // Remove the min row from the vector of rows left      
    T->rows_left.erase( it_remove );
    // Remember the row kicked out
-   T->seq[ T->seq_count++ ] = min_row;
+   T->seq[ T->seq_count ] = min_row;
+   T->seq_row[ min_row ] = ++T->seq_count;
 
-   if ( T->rows_left.empty() )
-      return false; //The end
+   if( size == 2 )
+   {
+      // No need to precess last one..
+      T->seq[ T->seq_count ] = T->rows_left[0];
+      T->seq_row[ T->rows_left[0] ] = ++T->seq_count;
+      return false;
+   }
 
    elems_removed += T->elem_count[min_row];
    g_last_elems_removed = T->elem_count[min_row];
    // Update the frequency table
    for( i=0 ; i<T->elem_count[min_row] ; ++i )
       --T->frq[ T->elem[min_row][i] ];
-   
+
    fflush (stdout);
+
    return true;
 }
 
@@ -693,11 +779,13 @@ void minus(TRSACT * T)
 
       if ( ! find_min( T) ) 
          return; // The end
+
 #ifdef SORT      
       if ( g_bSort )
       {
 	      int tmp = loops_after_sort;
          sort(T);
+
 #ifdef PRINT_DEBUG
          printf("sort/find: %4.2f, threshold=%d\n", double(g_sort_time)/double(g_find_time), SORT_THRESHOLD);
 #endif
@@ -753,10 +841,10 @@ int main(int argc, char* argv[])
    const char * outFileName = argv[2];
 #else
    //const char * inFileName = "C:\\Users\\Mikk\\data\\test.txt"; //"C:\\Users\\Mikk\\Dropbox\\git\\MinusTechnique\\data\\chess.dat";
-   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
-   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
-   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
-   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
+   //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.dat"; argc = 4;
+   //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\Amazon0312.out"; 
+   const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.dat"; argc = 3;
+   const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\connect.out";
    //const char * inFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.dat"; argc = 3;
    //const char * outFileName = "C:\\Users\\soonem\\Dropbox\\data\\kosarak.out";
    //const char * inFileName = "C:\\Users\\soonem\\data\\soc-LiveJournal1.txt"; argc=4;
@@ -780,11 +868,13 @@ int main(int argc, char* argv[])
    TRSACT_init(&TRows);
 
    minus(&TRows);
+   printf("Rows ordered\n");
    // print_table_data(&TRows);   
    // For debugging only columns
-   // for(int i = 0; i<nRows; ++i)
-   //   TRows.seq[i] = i;
-   
+
+//  for(int i = 0; i<nRows; ++i)
+//      TRows.seq[i] = nRows-i-1;
+
    // TRSACT_output_row_order(&TRows, outFileName);
    // Because didn't want to program a separate minus function for doing the horizontal removal..
    // ..we have this switch that will fake the data a bit
@@ -795,10 +885,10 @@ int main(int argc, char* argv[])
 
    minus(&TCols);
    
+   printf("Cols ordered\n");
    // print_table_data(&TCols);
    
-   // TRSACT_output_row_order(&TCols, outFileName);
-   
+   // TRSACT_output_row_order(&TCols, outFileName); 
    TRSACT_output_result(&TRows, &TCols, outFileName);
    
    TRSACT_free(&TCols);
