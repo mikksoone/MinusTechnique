@@ -75,6 +75,7 @@ namespace
    double   g_timePerLine     = LONG_MAX;
    bool     g_bSort           = 0;
    bool     g_dontSkip        = 0;
+   bool     g_bGraph          = 0;
    int g_average_break_point  = 0;
    int g_last_elems_removed   = 0;
 #ifdef DEBUG_STATUS_TO_FILE
@@ -600,7 +601,10 @@ inline int calculate_conform(int j, int increment, int size, TRSACT * T, int min
 {
    if( j >= size )
       return min;
-   int delta_check = j+increment*10;
+   // So we don't have to check too often
+   // If we have a graph, then make this ten times bigger
+   int delta_check = j+ ( g_bGraph ? 400 : 10 );
+
    for( ; j < size ; j+=increment )
    {
       auto row = T->rows_left[j];
@@ -664,7 +668,6 @@ static inline bool find_min(TRSACT * T)
 #ifndef THREADED
    min = calculate_conform(0,1,size, T, min);
 #else
-#ifdef SORT 
    std::vector<std::future<int>> futures;
    for(i=0; i<g_nThreads; ++i)
    {
@@ -682,33 +685,15 @@ static inline bool find_min(TRSACT * T)
       min = min < tmp ? min : tmp; 
    }
 #endif
-#endif
 
 #ifdef DEBUG_STATUS_TO_FILE
    fprintf(debug, "g_timeForConform=%.8f\n", g_timeForConform);
 #endif
-#if !defined(THREADED) || defined(SORT)
+
    for ( ;it_remove!=T->rows_left.end() ; it_remove++)
    {
       if ( T->conform[*it_remove]==min ) break;
    }
-#endif
-
-#if !defined(SORT) && defined(THREADED)
-   Concurrency::parallel_for_each(  T->rows_left.begin() , T->rows_left.end() , [T](int value)
-   {
-      // Calculate the conform for the current row..
-      for( int i=0 ; i<T->elem_count[value] ; i++ )
-         T->conform[value] += T->frq[ T->elem[(value)][i] ];
-   });
-
-   auto last = T->rows_left.end();
-   auto first = T->rows_left.begin();
-
-   while (++first!=last)
-      if( T->conform[*first] <  T->conform[*it_remove] )
-         it_remove=first;
-#endif
 
    g_timeForConform = ((double)(get_time()-time)/(double)g_quadPart); //-g_nThreads*g_threadCreateTime;
    g_timeForTotalConform += g_timeForConform; //+g_nThreads*g_threadCreateTime;
@@ -734,7 +719,7 @@ static inline bool find_min(TRSACT * T)
       if( ++cnt % 1000  == 0 )
       {
          double total_time = (get_time() - start_time ) / (double) g_quadPart;
-         printf( "rows_left=%d seconds=%4.2f conform=%d, sort_time=%4.2f\n",T->rows_left.size(), total_time, T->conform[min_row], (double)g_sort_time/(double)g_quadPart );
+         printf( "rows=%d time=%4.2f conform=%d, sort_time=%4.2f, conform_t=%4.4f, t_conform_t=%4.2f\n",T->rows_left.size(), total_time, T->conform[min_row], (double)g_sort_time/(double)g_quadPart, g_timeForConform, g_timeForTotalConform );
       }
    }
 
@@ -859,7 +844,7 @@ int main(int argc, char* argv[])
    TRSACT TRows;
 
    printf("\nStarting: %s\n", inFileName);
-
+   g_bGraph = argc == 3 ? false : true;
    if ( argc == 3 )
       TRSACT_file_load(&TRows, inFileName);
    else
